@@ -22,7 +22,7 @@ export class CodeFoldManager {
 	}
 
 	private get historyPath(): string {
-		return `${this.plugin.app.vault.configDir}/code-fold-history.json`;
+		return `${this.plugin.app.vault.configDir}/cursor-history/code-fold.json`;
 	}
 
 	async init(): Promise<void> {
@@ -45,27 +45,35 @@ export class CodeFoldManager {
 
 	// --- Persistence ---
 
+	private async ensureDirectoryExists(): Promise<void> {
+		const dir = `${this.plugin.app.vault.configDir}/cursor-history`;
+		if (!(await this.plugin.app.vault.adapter.exists(dir))) {
+			await this.plugin.app.vault.adapter.mkdir(dir);
+		}
+	}
+
 	async loadHistory(): Promise<void> {
 		try {
-			const exists = await this.plugin.app.vault.adapter.exists(this.historyPath);
-			if (exists) {
-				const content = await this.plugin.app.vault.adapter.read(this.historyPath);
+			const adapter = this.plugin.app.vault.adapter;
+			if (await adapter.exists(this.historyPath)) {
+				const content = await adapter.read(this.historyPath);
 				this.data = { ...DEFAULT_FOLD_HISTORY, ...JSON.parse(content) };
 			}
 		} catch (e) {
-			console.error('CodeFoldManager: Error loading code-fold-history.json:', e);
+			console.error('CodeFoldManager: Error loading code-fold.json:', e);
 			this.data = { ...DEFAULT_FOLD_HISTORY };
 		}
 	}
 
 	async saveHistory(): Promise<void> {
 		try {
+			await this.ensureDirectoryExists();
 			await this.plugin.app.vault.adapter.write(
 				this.historyPath,
 				JSON.stringify(this.data, null, 2)
 			);
 		} catch (e) {
-			console.error('CodeFoldManager: Error saving code-fold-history.json:', e);
+			console.error('CodeFoldManager: Error saving code-fold.json:', e);
 		}
 	}
 

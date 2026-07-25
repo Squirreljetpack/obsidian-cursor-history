@@ -58,7 +58,7 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Remember code block fold state")
-      .setDesc("Store and restore individual code block fold/unfold states across files in code-fold-history.json")
+      .setDesc("Store and restore individual code block fold/unfold states across files in .obsidian/cursor-history/code-fold.json")
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.codeFoldManager.getRememberFoldState())
@@ -69,7 +69,7 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Use folder local history")
-      .setDesc("Save history stack to .obsidian/cursor-history.json instead of plugin data.json")
+      .setDesc("Save history stack to .obsidian/cursor-history/cursor.json instead of plugin data.json")
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.useFolderLocalHistory)

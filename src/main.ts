@@ -338,7 +338,14 @@ export default class CursorHistoryPlugin extends Plugin {
   }
 
   private getHistoryFilePath(): string {
-    return `${this.app.vault.configDir}/cursor-history.json`;
+    return `${this.app.vault.configDir}/cursor-history/cursor.json`;
+  }
+
+  private async ensureHistoryDirectoryExists(): Promise<void> {
+    const dir = `${this.app.vault.configDir}/cursor-history`;
+    if (!(await this.app.vault.adapter.exists(dir))) {
+      await this.app.vault.adapter.mkdir(dir);
+    }
   }
 
   private isValidFilePath(filePath: string): boolean {
@@ -525,6 +532,7 @@ export default class CursorHistoryPlugin extends Plugin {
     if (this.settings.useFolderLocalHistory) {
       const path = this.getHistoryFilePath();
       try {
+        await this.ensureHistoryDirectoryExists();
         await this.app.vault.adapter.write(path, JSON.stringify(fileMap, null, 2));
       } catch (err) {
         console.error("Cursor History: Error writing folder local history file:", err);

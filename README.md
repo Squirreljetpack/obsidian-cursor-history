@@ -11,8 +11,8 @@ An [Obsidian](https://obsidian.md) plugin that tracks cursor position history ac
 - **Recently Opened Files Modal**: Fuzzy search modal (`Cursor History: Open recently opened files`) to quickly switch to recently opened files with position restoration.
 - **Current File History Modal**: Fuzzy search modal (`Cursor History: Open current file cursor history`) to view and jump between cursor positions within the active file (`line: line_initial_content`).
 - **Scroll Position Restoration**: Restores exact scroll/line positions automatically when reopening files.
-- **Folder-Local History**: Optional persistence to `.obsidian/cursor-history.json` inside your vault.
-- **Code Block Folding (Reading Mode)**: Toggle fold code blocks in Reading mode with state persisted in `.obsidian/code-fold-history.json` and automatic pruning of missing block signatures.
+- **Folder-Local History**: Optional persistence to `.obsidian/cursor-history/cursor.json` inside your vault.
+- **Code Block Folding (Reading Mode)**: Toggle fold code blocks in Reading mode with state persisted in `.obsidian/cursor-history/code-fold.json` and automatic pruning of missing block signatures.
 
 ## Installation
 
