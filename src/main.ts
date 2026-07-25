@@ -190,9 +190,16 @@ export default class CursorHistoryPlugin extends Plugin {
 
         if (this.settings.recordOnFileSwitch) {
           if (this.lastActiveLeaf && this.lastActiveLeaf !== leaf) {
-            this.recordPositionForLeaf(this.lastActiveLeaf);
+            this.recordPositionForLeaf(this.lastActiveLeaf, false);
           }
-          this.recordCurrentPosition();
+
+          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+          const activeFile = view?.file;
+          const willAutoRestore = this.settings.restoreScrollPosition && activeFile && this.fileLastPositions.has(activeFile.path);
+
+          if (!willAutoRestore) {
+            this.recordCurrentPosition(false);
+          }
         }
         this.lastActiveLeaf = leaf;
       }),
@@ -206,9 +213,7 @@ export default class CursorHistoryPlugin extends Plugin {
         const dbRecord = this.fileLastPositions.get(file.path);
         if (!dbRecord) return;
 
-        setTimeout(() => {
-          void this.restorePositionForOpenFile(file.path, dbRecord);
-        }, 50);
+        void this.restorePositionForOpenFile(file.path, dbRecord);
       }),
     );
 
@@ -634,19 +639,19 @@ export default class CursorHistoryPlugin extends Plugin {
     }, this.settings.scrollDebounceMs ?? 100);
   }
 
-  private recordCurrentPosition(): void {
+  private recordCurrentPosition(saveToDisk = true): void {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view?.file) return;
-    this.recordPositionForView(view);
+    this.recordPositionForView(view, saveToDisk);
   }
 
-  private recordPositionForLeaf(leaf: WorkspaceLeaf): void {
+  private recordPositionForLeaf(leaf: WorkspaceLeaf, saveToDisk = true): void {
     if (leaf.view instanceof MarkdownView && leaf.view.file) {
-      this.recordPositionForView(leaf.view);
+      this.recordPositionForView(leaf.view, saveToDisk);
     }
   }
 
-  private recordPositionForView(view: MarkdownView): void {
+  private recordPositionForView(view: MarkdownView, saveToDisk = true): void {
     const entry = this.getEntryForView(view);
     if (!entry) return;
 
@@ -665,20 +670,23 @@ export default class CursorHistoryPlugin extends Plugin {
       this.navStack.replaceCurrent(entry);
     }
 
-    let filePos = this.fileLastPositions.get(entry.filePath);
-    if (!filePos) {
-      filePos = {};
-      this.fileLastPositions.set(entry.filePath, filePos);
-    }
-    const ts = entry.timestamp || Date.now();
-    if (entry.mode === "edit") {
-      filePos.edit = { selection: entry.selection, timestamp: ts };
-    } else {
-      filePos.preview = { selection: entry.selection, timestamp: ts };
-    }
-
     this.currentState = entry;
-    this.scheduleHistorySave();
+
+    if (saveToDisk) {
+      let filePos = this.fileLastPositions.get(entry.filePath);
+      if (!filePos) {
+        filePos = {};
+        this.fileLastPositions.set(entry.filePath, filePos);
+      }
+      const ts = entry.timestamp || Date.now();
+      if (entry.mode === "edit") {
+        filePos.edit = { selection: entry.selection, timestamp: ts };
+      } else {
+        filePos.preview = { selection: entry.selection, timestamp: ts };
+      }
+
+      this.scheduleHistorySave();
+    }
   }
 
   private getEntryForView(view: MarkdownView): HistoryEntry | null {
@@ -899,10 +907,14 @@ export default class CursorHistoryPlugin extends Plugin {
         );
       } else if (entry.mode === "preview") {
         // Wait for Reading View DOM rendering to complete before applying scroll position
-        this.applyPreviewScrollWithRetry(view, entry.selection);
+        await this.applyPreviewScrollWithRetry(view, entry.selection);
       }
 
       this.currentState = entry;
+
+      if (isAutoRestore) {
+        this.recordPositionForView(view, false);
+      }
     } finally {
       setTimeout(() => {
         this.isNavigating = false;
@@ -910,19 +922,27 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-  private applyPreviewScrollWithRetry(view: MarkdownView, selection: PreviewSelection, attempts = 0): void {
-    const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
-    const previewView = view.previewMode;
+  private applyPreviewScrollWithRetry(view: MarkdownView, selection: PreviewSelection, attempts = 0): Promise<void> {
+    return new Promise((resolve) => {
+      const doScroll = (currAttempt: number) => {
+        const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
+        const previewView = view.previewMode;
 
-    if (previewEl && previewEl.scrollHeight > 0) {
-      if (typeof previewView.applyScroll === "function") {
-        previewView.applyScroll(selection.scrollLine);
-      }
-      previewEl.scrollTop = selection.scrollTop;
-    } else if (attempts < 10) {
-      setTimeout(() => {
-        this.applyPreviewScrollWithRetry(view, selection, attempts + 1);
-      }, 30);
-    }
+        if (previewEl && previewEl.scrollHeight > 0) {
+          if (typeof previewView.applyScroll === "function") {
+            previewView.applyScroll(selection.scrollLine);
+          }
+          previewEl.scrollTop = selection.scrollTop;
+          resolve();
+        } else if (currAttempt < 10) {
+          setTimeout(() => {
+            doScroll(currAttempt + 1);
+          }, 30);
+        } else {
+          resolve();
+        }
+      };
+      doScroll(attempts);
+    });
   }
 }
