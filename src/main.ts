@@ -1,10 +1,11 @@
 import { Extension } from "@codemirror/state";
 import { EditorView, keymap, ViewUpdate } from "@codemirror/view";
-import { MarkdownView, Notice, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, normalizePath, Plugin, TFile, WorkspaceLeaf } from "obsidian";
 import { CodeFoldManager } from "./code-fold-manager";
 import { CurrentFileHistoryModal } from "./current-file-history-modal";
 import { HistoryNavigatorModal } from "./history-navigator-modal";
 import { RecentFileItem, RecentFilesModal } from "./recent-files-modal";
+import { TruncateHistoryModal } from "./truncate-history-modal";
 import {
   EditHistoryEntry,
   FileHistoryMap,
@@ -50,10 +51,26 @@ export default class CursorHistoryPlugin extends Plugin {
   private fileLastPositions = new Map<string, FileLastPositions>();
   private currentState: HistoryEntry | null = null;
   private isNavigating = false;
+  private openingFiles = new Set<string>();
+  private openingFileTimers = new Map<string, number>();
+  private openingRestorations = new Map<string, Promise<void>>();
+  private leafFileMap = new WeakMap<WorkspaceLeaf, string>();
   private hotkeyExtension: Extension[] = [];
   private saveTimeoutId: number | null = null;
   private lastActiveLeaf: WorkspaceLeaf | null = null;
   public codeFoldManager = new CodeFoldManager(this);
+
+  private ensureLeafLockedIfFileChanged(leaf: WorkspaceLeaf | null | undefined): void {
+    if (!leaf) return;
+    const view = leaf.view;
+    if (view instanceof MarkdownView && view.file) {
+      const lastPath = this.leafFileMap.get(leaf);
+      if (lastPath !== view.file.path) {
+        this.leafFileMap.set(leaf, view.file.path);
+        this.lockOpeningFile(view.file.path);
+      }
+    }
+  }
 
   async onload() {
     await this.loadSettings();
@@ -87,7 +104,16 @@ export default class CursorHistoryPlugin extends Plugin {
       id: "open-cursor-history",
       name: "Open cursor history",
       callback: () => {
-        new HistoryNavigatorModal(this.app, this).open();
+        if (this.settings.initialModal === "global") {
+          new HistoryNavigatorModal(this.app, this).open();
+        } else {
+          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (!view || !view.file) {
+            new HistoryNavigatorModal(this.app, this).open();
+          } else {
+            new CurrentFileHistoryModal(this.app, this).open();
+          }
+        }
       },
     });
 
@@ -100,57 +126,10 @@ export default class CursorHistoryPlugin extends Plugin {
     });
 
     this.addCommand({
-      id: "open-current-file-cursor-history",
-      name: "Open current file cursor history",
+      id: "truncate-cursor-history",
+      name: "Truncate cursor history",
       callback: () => {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!view || !view.file) {
-          new Notice("No active file to show cursor history.");
-          return;
-        }
-        new CurrentFileHistoryModal(this.app, this).open();
-      },
-    });
-
-    this.addCommand({
-      id: "clear-current-file-history",
-      name: "Clear current file cursor history",
-      callback: async () => {
-        const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (!view || !view.file) {
-          new Notice("No active file to clear history.");
-          return;
-        }
-
-        const filePath = view.file.path;
-        const mode = view.getMode();
-
-        if (mode === "source") {
-          this.navStack.clearForFile(filePath, "edit");
-          const pos = this.fileLastPositions.get(filePath);
-          if (pos) {
-            delete pos.edit;
-            if (!pos.edit && !pos.preview) this.fileLastPositions.delete(filePath);
-          }
-          if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "edit") {
-            this.currentState = null;
-          }
-          await this.saveHistoryStackImmediate();
-          new Notice(`Cleared edit cursor history for ${view.file.basename}`);
-        } else {
-          await this.codeFoldManager.clearFileFoldHistory(filePath);
-          this.navStack.clearForFile(filePath, "preview");
-          const pos = this.fileLastPositions.get(filePath);
-          if (pos) {
-            delete pos.preview;
-            if (!pos.edit && !pos.preview) this.fileLastPositions.delete(filePath);
-          }
-          if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "preview") {
-            this.currentState = null;
-          }
-          await this.saveHistoryStackImmediate();
-          new Notice(`Cleared code fold and preview history for ${view.file.basename}`);
-        }
+        new TruncateHistoryModal(this.app, this).open();
       },
     });
 
@@ -188,32 +167,28 @@ export default class CursorHistoryPlugin extends Plugin {
       this.app.workspace.on("active-leaf-change", (leaf) => {
         if (this.isNavigating) return;
 
+        this.ensureLeafLockedIfFileChanged(leaf);
+
         if (this.settings.recordOnFileSwitch) {
           if (this.lastActiveLeaf && this.lastActiveLeaf !== leaf) {
             this.recordPositionForLeaf(this.lastActiveLeaf, false);
-          }
-
-          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-          const activeFile = view?.file;
-          const willAutoRestore = this.settings.restoreScrollPosition && activeFile && this.fileLastPositions.has(activeFile.path);
-
-          if (!willAutoRestore) {
-            this.recordCurrentPosition(false);
           }
         }
         this.lastActiveLeaf = leaf;
       }),
     );
 
-    // Listen for file opening in normal way to restore position from DB
+    // Listen for file opening in normal way to restore position or record target position
     this.registerEvent(
       this.app.workspace.on("file-open", (file) => {
-        if (!file || this.isNavigating || !this.settings.restoreScrollPosition) return;
-
-        const dbRecord = this.fileLastPositions.get(file.path);
-        if (!dbRecord) return;
-
-        void this.restorePositionForOpenFile(file.path, dbRecord);
+        if (!file || this.isNavigating) return;
+        this.lockOpeningFile(file.path);
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (activeView && activeView.file?.path === file.path && activeView.leaf) {
+          this.leafFileMap.set(activeView.leaf, file.path);
+        }
+        const openPromise = this.handleDocumentOpen(file);
+        this.openingRestorations.set(file.path, openPromise);
       }),
     );
 
@@ -221,6 +196,20 @@ export default class CursorHistoryPlugin extends Plugin {
     this.registerEditorExtension(
       EditorView.updateListener.of((update: ViewUpdate) => {
         if (this.isNavigating) return;
+
+        const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!activeView || !activeView.file) return;
+
+        this.ensureLeafLockedIfFileChanged(activeView.leaf);
+        if (this.openingFiles.has(activeView.file.path)) return;
+
+        if (activeView.getMode() !== "source") return;
+
+        if (update.docChanged) {
+          this.lockOpeningFile(activeView.file.path);
+          return;
+        }
+
         if (!update.selectionSet) return;
 
         this.recordCurrentPosition();
@@ -232,6 +221,7 @@ export default class CursorHistoryPlugin extends Plugin {
     this.app.workspace.onLayoutReady(async () => {
       await this.applyDefaultHotkeys();
       this.buildKeymap();
+      void this.removeNonExistentFileHistories();
     });
     this.registerEvent(
       this.app.workspace.on("layout-change", () => this.buildKeymap()),
@@ -246,14 +236,14 @@ export default class CursorHistoryPlugin extends Plugin {
     return this.navStack;
   }
 
-  public getRecentlyOpenedFiles(): RecentFileItem[] {
-    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const activePath = activeView?.file?.path;
+  getCurrentState(): HistoryEntry | null {
+    return this.currentState;
+  }
 
+  public getRecentlyOpenedFiles(): RecentFileItem[] {
     const timestamps = new Map<string, number>();
 
     for (const [filePath, pos] of this.fileLastPositions.entries()) {
-      if (activePath && filePath === activePath) continue;
       const editTs = pos.edit?.timestamp ?? 0;
       const previewTs = pos.preview?.timestamp ?? 0;
       const maxTs = Math.max(editTs, previewTs);
@@ -264,7 +254,6 @@ export default class CursorHistoryPlugin extends Plugin {
 
     const stack = this.navStack.getStack();
     for (const entry of stack) {
-      if (activePath && entry.filePath === activePath) continue;
       const currentMax = timestamps.get(entry.filePath) ?? 0;
       const ts = entry.timestamp ?? 0;
       if (ts > currentMax) {
@@ -278,12 +267,10 @@ export default class CursorHistoryPlugin extends Plugin {
 
     const result: RecentFileItem[] = [];
     for (const path of sortedPaths) {
-      if (this.isValidFilePath(path)) {
-        const file = this.app.vault.getAbstractFileByPath(path);
-        if (file instanceof TFile) {
-          const timestamp = timestamps.get(path) ?? file.stat.mtime;
-          result.push({ file, timestamp });
-        }
+      const file = this.getFileByPath(path);
+      if (file) {
+        const timestamp = timestamps.get(path) ?? file.stat.mtime;
+        result.push({ file, timestamp });
       }
     }
 
@@ -353,13 +340,27 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-  private isValidFilePath(filePath: string): boolean {
-    if (!filePath || typeof filePath !== "string") return false;
-    if (filePath.startsWith("!") || filePath.includes("![[")) return false;
-    if (filePath.includes("..") || filePath.includes("\0")) return false;
+  private getFileByPath(filePath: string): TFile | null {
+    if (!filePath || typeof filePath !== "string") return null;
+    if (filePath.startsWith("!") || filePath.includes("![[")) return null;
+    if (filePath.includes("..") || filePath.includes("\0")) return null;
 
-    const abstractFile = this.app.vault.getAbstractFileByPath(filePath);
-    return abstractFile instanceof TFile && abstractFile.extension === "md";
+    const normalized = normalizePath(filePath);
+    const abstractFile = this.app.vault.getAbstractFileByPath(normalized);
+    if (abstractFile instanceof TFile && abstractFile.extension === "md") {
+      return abstractFile;
+    }
+
+    const linkFile = this.app.metadataCache.getFirstLinkpathDest(filePath, "");
+    if (linkFile instanceof TFile && linkFile.extension === "md") {
+      return linkFile;
+    }
+
+    return null;
+  }
+
+  private isValidFilePath(filePath: string): boolean {
+    return this.getFileByPath(filePath) !== null;
   }
 
   private cleanupInvalidDbEntries(): void {
@@ -371,9 +372,213 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-  private async restorePositionForOpenFile(filePath: string, dbRecord: FileLastPositions): Promise<void> {
+  public async removeNonExistentFileHistories(): Promise<void> {
+    const initialPosCount = this.fileLastPositions.size;
+    const initialStackCount = this.navStack.getStack().length;
+
+    this.cleanupInvalidDbEntries();
+
+    if (
+      this.fileLastPositions.size !== initialPosCount ||
+      this.navStack.getStack().length !== initialStackCount
+    ) {
+      await this.saveHistoryStackImmediate();
+    }
+  }
+
+  public async clearCurrentFileHistory(): Promise<boolean> {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || !view.file) {
+      new Notice("No active file to clear history.");
+      return false;
+    }
+
+    const filePath = view.file.path;
+    const mode = view.getMode();
+
+    if (mode === "source") {
+      this.navStack.clearForFile(filePath, "edit");
+      const pos = this.fileLastPositions.get(filePath);
+      if (pos) {
+        delete pos.edit;
+        if (!pos.edit && !pos.preview) this.fileLastPositions.delete(filePath);
+      }
+      if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "edit") {
+        this.currentState = null;
+      }
+      await this.saveHistoryStackImmediate();
+      new Notice(`Cleared edit cursor history for ${view.file.basename}`);
+    } else {
+      await this.codeFoldManager.clearFileFoldHistory(filePath);
+      this.navStack.clearForFile(filePath, "preview");
+      const pos = this.fileLastPositions.get(filePath);
+      if (pos) {
+        delete pos.preview;
+        if (!pos.edit && !pos.preview) this.fileLastPositions.delete(filePath);
+      }
+      if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "preview") {
+        this.currentState = null;
+      }
+      await this.saveHistoryStackImmediate();
+      new Notice(`Cleared code fold and preview history for ${view.file.basename}`);
+    }
+    return true;
+  }
+
+  public async clearGlobalHistory(): Promise<void> {
+    this.navStack.truncate(0);
+    this.fileLastPositions.clear();
+    this.currentState = null;
+    await this.saveHistoryStackImmediate();
+    new Notice("Cleared global cursor history.");
+  }
+
+  public async truncateHistory(n: number): Promise<void> {
+    this.navStack.truncate(n);
+
+    if (n <= 0) {
+      this.fileLastPositions.clear();
+      this.currentState = null;
+    } else {
+      const entries = Array.from(this.fileLastPositions.entries()).map(([path, pos]) => {
+        const editTs = pos.edit?.timestamp ?? 0;
+        const previewTs = pos.preview?.timestamp ?? 0;
+        return { path, maxTs: Math.max(editTs, previewTs) };
+      });
+
+      entries.sort((a, b) => b.maxTs - a.maxTs);
+
+      if (entries.length > n) {
+        const toKeep = new Set(entries.slice(0, n).map((e) => e.path));
+        for (const path of Array.from(this.fileLastPositions.keys())) {
+          if (!toKeep.has(path)) {
+            this.fileLastPositions.delete(path);
+          }
+        }
+      }
+    }
+
+    await this.saveHistoryStackImmediate();
+    new Notice(`Truncated cursor history to ${n} entries.`);
+  }
+
+  private getMarkdownViewForFile(filePath: string): MarkdownView | null {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (activeView && activeView.file?.path === filePath) {
+      return activeView;
+    }
+    const leaves = this.app.workspace.getLeavesOfType("markdown");
+    const matchingLeaf = leaves.find((l) => (l.view as MarkdownView).file?.path === filePath);
+    if (matchingLeaf) {
+      return matchingLeaf.view as MarkdownView;
+    }
+    return null;
+  }
+
+  private lockOpeningFile(filePath: string): void {
+    if (!filePath) return;
+    this.openingFiles.add(filePath);
+
+    const delay = this.settings.openRecordDelayMs ?? 1000;
+
+    const existingTimer = this.openingFileTimers.get(filePath);
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+    }
+
+    const timer = window.setTimeout(async () => {
+      const restorationPromise = this.openingRestorations.get(filePath);
+      if (restorationPromise) {
+        try {
+          await restorationPromise;
+        } catch {
+          // ignore error in scroll restoration
+        }
+      }
+
+      if (this.openingFileTimers.get(filePath) !== timer) return;
+
+      this.openingFiles.delete(filePath);
+      this.openingFileTimers.delete(filePath);
+      this.openingRestorations.delete(filePath);
+
+      const settledView = this.getMarkdownViewForFile(filePath);
+      if (settledView && settledView.file?.path === filePath) {
+        this.recordPositionForView(settledView, true);
+      }
+    }, delay);
+
+    this.openingFileTimers.set(filePath, timer);
+  }
+
+  private async handleDocumentOpen(file: TFile): Promise<void> {
+    const filePath = file.path;
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    const view = this.getMarkdownViewForFile(filePath);
     if (!view || view.file?.path !== filePath) return;
+
+    const hasTarget = this.hasOpenFileTargetLine(view);
+
+    if (!hasTarget) {
+      // Non-targeted open:
+      // DO scroll (restore stored position if restoreScrollPosition setting is enabled)
+      if (this.settings.restoreScrollPosition) {
+        await this.restorePositionForOpenFile(filePath);
+      }
+    }
+  }
+
+  private hasOpenFileTargetLine(view: MarkdownView): boolean {
+    const leaf = view.leaf as any;
+    if (!leaf) return false;
+
+    // 1. Check Ephemeral State (eState)
+    const eState = typeof leaf.getEphemeralState === "function" ? leaf.getEphemeralState() : null;
+    if (eState) {
+      if (typeof eState.line === "number" && eState.line > 0) {
+        return true;
+      }
+      if (eState.cursor && (eState.cursor.line > 0 || eState.cursor.from?.line > 0)) {
+        return true;
+      }
+      if (typeof eState.subpath === "string" && eState.subpath.trim() !== "") {
+        return true;
+      }
+      if (eState.match) {
+        return true;
+      }
+      if (typeof eState.scroll === "number" && eState.scroll > 0) {
+        return true;
+      }
+    }
+
+    // 2. Check View State (state.subpath)
+    const viewState = typeof leaf.getViewState === "function" ? leaf.getViewState() : null;
+    if (viewState?.state) {
+      if (typeof viewState.state.subpath === "string" && viewState.state.subpath.trim() !== "") {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async restorePositionForOpenFile(filePath: string): Promise<void> {
+    let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || view.file?.path !== filePath) {
+      const leaves = this.app.workspace.getLeavesOfType("markdown");
+      const matchingLeaf = leaves.find((l) => (l.view as MarkdownView).file?.path === filePath);
+      if (matchingLeaf) {
+        view = matchingLeaf.view as MarkdownView;
+      }
+    }
+
+    if (!view || view.file?.path !== filePath) return;
+
+    const dbRecord = this.fileLastPositions.get(filePath);
+    if (!dbRecord) return;
 
     let targetMode: "edit" | "preview" | null = null;
 
@@ -406,7 +611,7 @@ export default class CursorHistoryPlugin extends Plugin {
         selection: dbRecord.edit.selection,
         timestamp: dbRecord.edit.timestamp,
       };
-      await this.navigateTo(entry, true);
+      await this.navigateTo(entry);
     } else if (targetMode === "preview" && dbRecord.preview) {
       const entry: HistoryEntry = {
         mode: "preview",
@@ -414,7 +619,7 @@ export default class CursorHistoryPlugin extends Plugin {
         selection: dbRecord.preview.selection,
         timestamp: dbRecord.preview.timestamp,
       };
-      await this.navigateTo(entry, true);
+      await this.navigateTo(entry);
     }
   }
 
@@ -508,7 +713,6 @@ export default class CursorHistoryPlugin extends Plugin {
 
     // Note: In-memory NavigationStack starts empty upon startup as requested.
     this.navStack.setStack([]);
-    this.cleanupInvalidDbEntries();
   }
 
   private scheduleHistorySave(): void {
@@ -526,8 +730,6 @@ export default class CursorHistoryPlugin extends Plugin {
       window.clearTimeout(this.saveTimeoutId);
       this.saveTimeoutId = null;
     }
-
-    this.cleanupInvalidDbEntries();
 
     const fileMap: FileHistoryMap = {};
     for (const [filePath, pos] of this.fileLastPositions.entries()) {
@@ -586,6 +788,9 @@ export default class CursorHistoryPlugin extends Plugin {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || view.getMode() !== "preview" || !view.file) return;
 
+    this.ensureLeafLockedIfFileChanged(view.leaf);
+    if (this.openingFiles.has(view.file.path)) return;
+
     const clickedLine = this.getClickedLineFromElement(target);
     if (clickedLine === null) return;
 
@@ -629,13 +834,21 @@ export default class CursorHistoryPlugin extends Plugin {
   private handleReadingViewScroll(): void {
     if (this.isNavigating) return;
 
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || !view.file) return;
+
+    this.ensureLeafLockedIfFileChanged(view.leaf);
+    if (this.openingFiles.has(view.file.path)) return;
+
     if (this.previewScrollTimeoutId !== null) {
       window.clearTimeout(this.previewScrollTimeoutId);
     }
 
     this.previewScrollTimeoutId = window.setTimeout(() => {
       this.previewScrollTimeoutId = null;
-      this.recordCurrentPosition();
+      if (view.file && !this.openingFiles.has(view.file.path)) {
+        this.recordCurrentPosition();
+      }
     }, this.settings.scrollDebounceMs ?? 100);
   }
 
@@ -652,8 +865,13 @@ export default class CursorHistoryPlugin extends Plugin {
   }
 
   private recordPositionForView(view: MarkdownView, saveToDisk = true): void {
+    if (!view?.file) return;
+
+    this.ensureLeafLockedIfFileChanged(view.leaf);
+    if (this.openingFiles.has(view.file.path)) return;
+
     const entry = this.getEntryForView(view);
-    if (!entry) return;
+    if (!entry || entry.filePath !== view.file.path) return;
 
     if (!this.isValidFilePath(entry.filePath)) return;
 
@@ -695,9 +913,26 @@ export default class CursorHistoryPlugin extends Plugin {
 
     if (mode === "preview") {
       const previewView = view.previewMode;
-      const scrollLine = typeof previewView.getScroll === "function" ? previewView.getScroll() : 0;
-      const previewEl = view.contentEl.querySelector(".markdown-preview-view");
+      let scrollLine = typeof previewView.getScroll === "function" ? previewView.getScroll() : 0;
+      const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
       const scrollTop = previewEl ? previewEl.scrollTop : 0;
+
+      if (scrollLine === 0 && previewEl && previewEl.scrollTop > 10) {
+        const sections = previewEl.querySelectorAll(".markdown-rendered > *");
+        for (let i = 0; i < sections.length; i++) {
+          const sec = sections[i] as HTMLElement;
+          if (sec.offsetTop + sec.offsetHeight > previewEl.scrollTop) {
+            const line = this.getClickedLineFromElement(sec);
+            if (line !== null && line >= 0) {
+              scrollLine = line;
+              break;
+            }
+          }
+        }
+        if (scrollLine === 0) {
+          scrollLine = Math.floor(previewEl.scrollTop / 24);
+        }
+      }
 
       const entry: PreviewHistoryEntry = {
         mode: "preview",
@@ -879,18 +1114,21 @@ export default class CursorHistoryPlugin extends Plugin {
     if (entry) await this.navigateTo(entry);
   }
 
-  public async navigateTo(entry: HistoryEntry, isAutoRestore = false): Promise<void> {
+  public async navigateTo(entry: HistoryEntry): Promise<void> {
     this.isNavigating = true;
 
     try {
-      const file = this.app.vault.getAbstractFileByPath(entry.filePath);
-      if (!(file instanceof TFile)) return;
+      const file = this.getFileByPath(entry.filePath);
+      if (!file) return;
 
-      const leaf = this.app.workspace.getLeaf(false);
-      await leaf.openFile(file);
+      let view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view || view.file?.path !== entry.filePath) {
+        const leaf = this.app.workspace.getLeaf(false);
+        await leaf.openFile(file);
+        view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      }
 
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!view) return;
+      if (!view || view.file?.path !== entry.filePath) return;
 
       if (entry.mode === "edit") {
         const editor = view.editor;
@@ -906,19 +1144,14 @@ export default class CursorHistoryPlugin extends Plugin {
           true,
         );
       } else if (entry.mode === "preview") {
-        // Wait for Reading View DOM rendering to complete before applying scroll position
         await this.applyPreviewScrollWithRetry(view, entry.selection);
       }
 
       this.currentState = entry;
-
-      if (isAutoRestore) {
-        this.recordPositionForView(view, false);
-      }
     } finally {
       setTimeout(() => {
         this.isNavigating = false;
-      }, 150);
+      }, 200);
     }
   }
 
@@ -928,16 +1161,29 @@ export default class CursorHistoryPlugin extends Plugin {
         const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
         const previewView = view.previewMode;
 
-        if (previewEl && previewEl.scrollHeight > 0) {
+        if (previewEl) {
           if (typeof previewView.applyScroll === "function") {
             previewView.applyScroll(selection.scrollLine);
           }
-          previewEl.scrollTop = selection.scrollTop;
-          resolve();
-        } else if (currAttempt < 10) {
+          if (selection.scrollTop > 0) {
+            previewEl.scrollTop = selection.scrollTop;
+          }
+
+          const isTargetReached = selection.scrollTop === 0 || Math.abs(previewEl.scrollTop - selection.scrollTop) <= 2;
+          const isAtBottom =
+            previewEl.scrollTop > 0 &&
+            Math.abs(previewEl.scrollTop - (previewEl.scrollHeight - previewEl.clientHeight)) <= 2;
+
+          if ((isTargetReached || isAtBottom) && currAttempt >= 2) {
+            resolve();
+            return;
+          }
+        }
+
+        if (currAttempt < 25) {
           setTimeout(() => {
             doScroll(currAttempt + 1);
-          }, 30);
+          }, 40);
         } else {
           resolve();
         }

@@ -56,6 +56,25 @@ export class NavigationStack {
 		this.enforceMaxSize();
 	}
 
+	truncate(n: number): void {
+		if (n <= 0) {
+			this.editStack = [];
+			this.editIndex = -1;
+			this.previewStack = [];
+			this.previewIndex = -1;
+			return;
+		}
+		while (this.editStack.length > n) {
+			this.editStack.shift();
+		}
+		this.editIndex = Math.min(this.editIndex, this.editStack.length - 1);
+
+		while (this.previewStack.length > n) {
+			this.previewStack.shift();
+		}
+		this.previewIndex = Math.min(this.previewIndex, this.previewStack.length - 1);
+	}
+
 	push(entry: HistoryEntry): void {
 		if (entry.mode === 'edit') {
 			this.pushEdit(entry);

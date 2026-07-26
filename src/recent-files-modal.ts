@@ -13,6 +13,42 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
     super(app);
     this.plugin = plugin;
     this.setPlaceholder("Type to search recently opened files...");
+
+    this.scope.register(["Meta"], "s", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      void this.toggleShowDate();
+      return false;
+    });
+    this.scope.register(["Mod"], "s", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      void this.toggleShowDate();
+      return false;
+    });
+  }
+
+  onOpen(): void {
+    super.onOpen();
+    this.containerEl.addEventListener(
+      "keydown",
+      (evt: KeyboardEvent) => {
+        if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "s") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          void this.toggleShowDate();
+        }
+      },
+      true
+    );
+  }
+
+  private async toggleShowDate(): Promise<void> {
+    this.plugin.settings.showDateInModal = !this.plugin.settings.showDateInModal;
+    await this.plugin.saveSettings();
+    if (typeof (this as any).updateSuggestions === "function") {
+      (this as any).updateSuggestions();
+    } else if (this.inputEl) {
+      this.inputEl.dispatchEvent(new Event("input"));
+    }
   }
 
   getItems(): RecentFileItem[] {
