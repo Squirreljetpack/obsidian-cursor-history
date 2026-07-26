@@ -2,12 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.4.0] - 2026-07-25
+
+### Added
+
+- **Startup Missing Files Cleanup**: Automatically kick off a non-blocking background job on startup to remove cursor histories for files that no longer exist in the vault.
+- **Truncate History Command**: New command `Truncate cursor history` to prompt user for $N$ (default 0) and truncate in-memory navigation stack and per-file position histories to the $N$ most recent entries.
+- **Toggle Access Time Shortcut in Recent Files Modal**: Added `Meta+S` (`Mod+S`) shortcut inside the `Open recently opened files` modal to toggle displaying formatted access timestamps in gray on the right side.
+
 ## [1.3.1] - 2026-07-24
 
 ### Changed
 
 - **Subfolder History Location**: Moved vault-level history files into `.obsidian/cursor-history/` subfolder (`code-fold.json` and `cursor.json`) with automatic directory creation.
-- **Active File Stack History**: Record active file to history stack without saving to disk on file activation, chained directly after scroll restoration finishes.
+- **Active File Stack History**: Record active file to history stack on file activation.
 
 ## [1.3.0] - 2026-07-22
 
