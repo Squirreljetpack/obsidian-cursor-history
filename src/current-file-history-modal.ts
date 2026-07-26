@@ -59,11 +59,19 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
     void this.plugin.clearCurrentFileHistory();
   }
 
-  onOpen(): void {
+  async onOpen(): Promise<void> {
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (activeView) {
-      const content = activeView.editor ? activeView.editor.getValue() : (activeView.data || "");
-      this.lines = content.split("\n");
+      if (activeView.editor) {
+        const content = activeView.editor.getValue();
+        this.lines = content.split("\n");
+      } else if (activeView.file) {
+        const content = await this.app.vault.cachedRead(activeView.file);
+        this.lines = content.split("\n");
+      } else {
+        const content = activeView.getViewData() || activeView.data || "";
+        this.lines = content.split("\n");
+      }
     } else {
       this.lines = [];
     }
