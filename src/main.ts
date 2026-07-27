@@ -40,10 +40,6 @@ declare module "obsidian" {
   }
 }
 
-const DESIRED_HOTKEYS: Record<string, ObsidianHotkey> = {
-  "cursor-history:go-back": { modifiers: ["Mod"], key: "[" },
-  "cursor-history:go-forward": { modifiers: ["Mod"], key: "]" },
-};
 
 export default class CursorHistoryPlugin extends Plugin {
   settings: CursorHistorySettings = DEFAULT_SETTINGS;
@@ -169,10 +165,8 @@ export default class CursorHistoryPlugin extends Plugin {
 
         this.ensureLeafLockedIfFileChanged(leaf);
 
-        if (this.settings.recordOnFileSwitch) {
-          if (this.lastActiveLeaf && this.lastActiveLeaf !== leaf) {
-            this.recordPositionForLeaf(this.lastActiveLeaf, false);
-          }
+        if (this.lastActiveLeaf && this.lastActiveLeaf !== leaf) {
+          this.recordPositionForLeaf(this.lastActiveLeaf, false);
         }
         this.lastActiveLeaf = leaf;
       }),
@@ -218,8 +212,7 @@ export default class CursorHistoryPlugin extends Plugin {
 
     // Keymaps for key-repeat support
     this.registerEditorExtension(this.hotkeyExtension);
-    this.app.workspace.onLayoutReady(async () => {
-      await this.applyDefaultHotkeys();
+    this.app.workspace.onLayoutReady(() => {
       this.buildKeymap();
       void this.removeNonExistentFileHistories();
     });
@@ -964,35 +957,6 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-  private async applyDefaultHotkeys() {
-    if (this.settings.hotkeyDefaultsApplied) return;
-
-    const configPath = `${this.app.vault.configDir}/hotkeys.json`;
-    let hotkeys: Record<string, ObsidianHotkey[]> = {};
-
-    try {
-      hotkeys = JSON.parse(await this.app.vault.adapter.read(configPath));
-    } catch {
-      // File doesn't exist or is invalid
-    }
-
-    let changed = false;
-    for (const [cmdId, hk] of Object.entries(DESIRED_HOTKEYS)) {
-      if (hotkeys[cmdId]) continue;
-      hotkeys[cmdId] = [hk];
-      changed = true;
-    }
-
-    if (changed) {
-      await this.app.vault.adapter.write(configPath, JSON.stringify(hotkeys, null, "  "));
-      if (typeof this.app.hotkeyManager?.load === "function") {
-        await this.app.hotkeyManager.load();
-      }
-    }
-
-    this.settings.hotkeyDefaultsApplied = true;
-    await this.saveSettings();
-  }
 
   private buildKeymap(): void {
     const backKeys = this.getCommandHotkeys("cursor-history:go-back");

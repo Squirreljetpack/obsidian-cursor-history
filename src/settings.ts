@@ -2,12 +2,9 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import type CursorHistoryPlugin from "./main";
 
 export interface CursorHistorySettings {
-  hotkeyDefaultsApplied: boolean;
   useFolderLocalHistory: boolean;
   restoreScrollPosition: boolean;
   rememberModeOnFileOpen: boolean;
-  recordOnFileSwitch: boolean;
-  showDateInModal: boolean;
   initialModal: "current" | "global";
   maxEntries: number;
   maxLineLength: number;
@@ -20,12 +17,9 @@ export interface CursorHistorySettings {
 }
 
 export const DEFAULT_SETTINGS: CursorHistorySettings = {
-  hotkeyDefaultsApplied: false,
   useFolderLocalHistory: false,
   restoreScrollPosition: true,
   rememberModeOnFileOpen: false,
-  recordOnFileSwitch: false,
-  showDateInModal: false,
   initialModal: "current",
   maxEntries: 50,
   maxLineLength: 120,
@@ -51,43 +45,8 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Cursor History Settings" });
 
-    new Setting(containerEl)
-      .setName("Fold all code blocks by default")
-      .setDesc(
-        "Automatically fold all rendered code blocks in Reading mode by default (changing this setting clears all stored code block fold history)",
-      )
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.codeFoldManager.getFoldAll())
-          .onChange(async value => {
-            await this.plugin.codeFoldManager.setFoldAll(value);
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Remember code block fold state")
-      .setDesc(
-        "Store and restore individual code block fold/unfold states across files in .obsidian/cursor-history/code-fold.json",
-      )
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.codeFoldManager.getRememberFoldState())
-          .onChange(async value => {
-            await this.plugin.codeFoldManager.setRememberFoldState(value);
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Use folder local history")
-      .setDesc("Save history stack to .obsidian/cursor-history/cursor.json instead of plugin data.json")
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.useFolderLocalHistory)
-          .onChange(async value => {
-            this.plugin.settings.useFolderLocalHistory = value;
-            await this.plugin.saveSettingsAndHistory();
-          })
-      );
+    // Section 1: Navigation & File Behavior
+    containerEl.createEl("h3", { text: "Navigation & File Behavior" });
 
     new Setting(containerEl)
       .setName("Restore scroll position on file open")
@@ -114,54 +73,36 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Record position on file switch")
-      .setDesc("Record history entries when switching between files or tabs")
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.recordOnFileSwitch)
-          .onChange(async value => {
-            this.plugin.settings.recordOnFileSwitch = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Show date in modals")
-      .setDesc("Display formatted date/time in gray for entries in history modals")
-      .addToggle(toggle =>
-        toggle
-          .setValue(this.plugin.settings.showDateInModal)
-          .onChange(async value => {
-            this.plugin.settings.showDateInModal = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Default history modal")
+      .setName("File open record delay (ms)")
       .setDesc(
-        "Choose which modal opens initially when running 'Open cursor history'. Falls back to global history if 'Current file history' is selected but no file is active.",
+        "Delay in milliseconds after opening a file before recording the settled position in navigation stack",
       )
-      .addDropdown(dropdown =>
-        dropdown
-          .addOption("current", "Current file history")
-          .addOption("global", "Global history")
-          .setValue(this.plugin.settings.initialModal ?? "current")
+      .addText(text =>
+        text
+          .setPlaceholder("1000")
+          .setValue(String(this.plugin.settings.openRecordDelayMs ?? 1000))
           .onChange(async value => {
-            this.plugin.settings.initialModal = value as "current" | "global";
-            await this.plugin.saveSettings();
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num >= 0) {
+              this.plugin.settings.openRecordDelayMs = num;
+              await this.plugin.saveSettings();
+            }
           })
       );
 
-    containerEl.createEl("h3", { text: "Modal Shortcuts" });
-    new Setting(containerEl)
-      .setName("Switch modal mode")
-      .setDesc("Press Tab inside any history modal to toggle between Current File History and Global History.");
+    // Section 2: History Storage & Capacity
+    containerEl.createEl("h3", { text: "History Storage & Capacity" });
 
     new Setting(containerEl)
-      .setName("Clear history")
-      .setDesc(
-        "Press Meta+L (Cmd+L on Mac, Ctrl+L on Windows/Linux) inside a history modal to clear history. On Current File History modal, it clears history for the active file; on Global History modal, it clears all global history.",
+      .setName("Use folder local history")
+      .setDesc("Save history stack to .obsidian/cursor-history/cursor.json instead of plugin data.json")
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.useFolderLocalHistory)
+          .onChange(async value => {
+            this.plugin.settings.useFolderLocalHistory = value;
+            await this.plugin.saveSettingsAndHistory();
+          })
       );
 
     new Setting(containerEl)
@@ -178,6 +119,39 @@ export class CursorHistorySettingTab extends PluginSettingTab {
               this.plugin.updateMaxEntries(num);
               await this.plugin.saveSettings();
             }
+          })
+      );
+
+    // Section 3: History Modals
+    containerEl.createEl("h3", { text: "History Modals" });
+
+    // 1. Create a fragment
+    const descFragment = document.createDocumentFragment();
+
+    // 2. Append text and HTML elements (like <br> for line breaks)
+    descFragment.append(
+      "Choose which modal opens initially when running 'Open cursor history'. Falls back to global history if 'Current file history' is selected but no file is active.",
+      descFragment.createEl("br"),
+      descFragment.createEl("br"),
+      "Tab: Switch between Current File History and Global History",
+      descFragment.createEl("br"),
+      "Cmd+S (Ctrl+S on Windows/Linux): Toggle date display",
+      descFragment.createEl("br"),
+      "Cmd+L (Ctrl+L on Windows/Linux): Clear history (active file in Current File mode, or all history in Global mode)",
+    );
+
+    // 3. Pass the fragment to setDesc
+    new Setting(containerEl)
+      .setName("Default history modal")
+      .setDesc(descFragment)
+      .addDropdown(dropdown =>
+        dropdown
+          .addOption("current", "Current file history")
+          .addOption("global", "Global history")
+          .setValue(this.plugin.settings.initialModal ?? "current")
+          .onChange(async value => {
+            this.plugin.settings.initialModal = value as "current" | "global";
+            await this.plugin.saveSettings();
           })
       );
 
@@ -235,23 +209,8 @@ export class CursorHistorySettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("File open record delay (ms)")
-      .setDesc(
-        "Delay in milliseconds after opening a file before recording the settled position in navigation stack",
-      )
-      .addText(text =>
-        text
-          .setPlaceholder("1000")
-          .setValue(String(this.plugin.settings.openRecordDelayMs ?? 1000))
-          .onChange(async value => {
-            const num = parseInt(value, 10);
-            if (!isNaN(num) && num >= 0) {
-              this.plugin.settings.openRecordDelayMs = num;
-              await this.plugin.saveSettings();
-            }
-          })
-      );
+    // Section 4: Recording Sensitivity & Thresholds
+    containerEl.createEl("h3", { text: "Recording Sensitivity & Thresholds" });
 
     new Setting(containerEl)
       .setName("Edit mode jump threshold (lines)")
@@ -302,6 +261,35 @@ export class CursorHistorySettingTab extends PluginSettingTab {
               this.plugin.settings.scrollDebounceMs = num;
               await this.plugin.saveSettings();
             }
+          })
+      );
+
+    // Section 5: Code Block Folding
+    containerEl.createEl("h3", { text: "Code Block Folding" });
+
+    new Setting(containerEl)
+      .setName("Fold all code blocks by default")
+      .setDesc(
+        "Automatically fold all rendered code blocks in Reading mode by default (changing this setting clears all stored code block fold history)",
+      )
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.codeFoldManager.getFoldAll())
+          .onChange(async value => {
+            await this.plugin.codeFoldManager.setFoldAll(value);
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Remember code block fold state")
+      .setDesc(
+        "Store and restore individual code block fold/unfold states across files in .obsidian/cursor-history/code-fold.json",
+      )
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.codeFoldManager.getRememberFoldState())
+          .onChange(async value => {
+            await this.plugin.codeFoldManager.setRememberFoldState(value);
           })
       );
   }

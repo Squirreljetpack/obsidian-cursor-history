@@ -1,6 +1,6 @@
 import { App, FuzzyMatch, FuzzySuggestModal, MarkdownView } from "obsidian";
-import type CursorHistoryPlugin from "./main";
 import { HistoryNavigatorModal } from "./history-navigator-modal";
+import type CursorHistoryPlugin from "./main";
 import { HistoryEntry } from "./navigation-stack";
 
 declare module "obsidian" {
@@ -18,6 +18,7 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
   private plugin: CursorHistoryPlugin;
   private lines: string[] = [];
   private isToggling = false;
+  private showDateInModal = false;
 
   constructor(app: App, plugin: CursorHistoryPlugin) {
     super(app);
@@ -45,6 +46,17 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
       this.clearHistory();
       return false;
     });
+
+    this.scope.register(["Mod"], "s", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.toggleShowDate();
+      return false;
+    });
+    this.scope.register(["Meta"], "s", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.toggleShowDate();
+      return false;
+    });
   }
 
   private toggleToGlobalHistory(): void {
@@ -57,6 +69,15 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
   private clearHistory(): void {
     this.close();
     void this.plugin.clearCurrentFileHistory();
+  }
+
+  private toggleShowDate(): void {
+    this.showDateInModal = !this.showDateInModal;
+    if (this.chooser && typeof this.chooser.updateSuggestions === "function") {
+      this.chooser.updateSuggestions();
+    } else if (this.inputEl) {
+      this.inputEl.dispatchEvent(new Event("input"));
+    }
   }
 
   async onOpen(): Promise<void> {
@@ -88,9 +109,13 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
           evt.preventDefault();
           evt.stopPropagation();
           this.clearHistory();
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "s") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.toggleShowDate();
         }
       },
-      true
+      true,
     );
 
     this.scrollToCurrentIndex();
@@ -104,10 +129,10 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
     const index = this.chooser.values.findIndex((item) => {
       const entry = (item as any).item ?? item;
       return (
-        entry === current ||
-        (entry.filePath === current.filePath &&
-          entry.mode === current.mode &&
-          entry.timestamp === current.timestamp)
+        entry === current
+        || (entry.filePath === current.filePath
+          && entry.mode === current.mode
+          && entry.timestamp === current.timestamp)
       );
     });
 
@@ -141,17 +166,9 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
       return targetLine;
     }
     for (let d = 1; d <= fuzz; d++) {
-      const prevIdx = targetLineIndex - d;
-      if (prevIdx >= 0 && prevIdx < this.lines.length) {
-        if (this.lines[prevIdx].trim() !== "") {
-          return this.lines[prevIdx];
-        }
-      }
-      const nextIdx = targetLineIndex + d;
-      if (nextIdx >= 0 && nextIdx < this.lines.length) {
-        if (this.lines[nextIdx].trim() !== "") {
-          return this.lines[nextIdx];
-        }
+      for (const idx of [targetLineIndex + d, targetLineIndex - d]) {
+        const line = this.lines[idx];
+        if (line?.trim()) return line;
       }
     }
     return targetLine;
@@ -202,10 +219,25 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
 
   renderSuggestion(match: FuzzyMatch<HistoryEntry>, el: HTMLElement): void {
     super.renderSuggestion(match, el);
-    if (this.plugin.settings.showDateInModal && match.item.timestamp) {
+    if (this.showDateInModal && match.item.timestamp) {
+      let contentEl = el.querySelector(".cursor-history-modal-content") as HTMLElement | null;
+      if (!contentEl) {
+        contentEl = document.createElement("div");
+        contentEl.className = "cursor-history-modal-content";
+        while (el.firstChild) {
+          contentEl.appendChild(el.firstChild);
+        }
+        el.appendChild(contentEl);
+      }
+      contentEl.style.flex = "1 1 auto";
+      contentEl.style.minWidth = "0";
+
       el.style.display = "flex";
+      el.style.flexWrap = "wrap";
       el.style.justifyContent = "space-between";
       el.style.alignItems = "center";
+      el.style.gap = "2px 8px";
+
       const dateStr = new Date(match.item.timestamp).toLocaleString();
       const dateEl = el.createEl("span", {
         text: dateStr,
@@ -213,8 +245,9 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
       });
       dateEl.style.color = "var(--text-muted, gray)";
       dateEl.style.fontSize = "0.8em";
-      dateEl.style.marginLeft = "10px";
       dateEl.style.whiteSpace = "nowrap";
+      dateEl.style.marginLeft = "auto";
+      dateEl.style.textAlign = "right";
     }
   }
 

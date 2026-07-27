@@ -17,6 +17,7 @@ declare module "obsidian" {
 export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
   private plugin: CursorHistoryPlugin;
   private isToggling = false;
+  private showDateInModal = false;
 
   constructor(app: App, plugin: CursorHistoryPlugin) {
     super(app);
@@ -47,6 +48,17 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
       this.clearHistory();
       return false;
     });
+
+    this.scope.register(["Mod"], "s", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.toggleShowDate();
+      return false;
+    });
+    this.scope.register(["Meta"], "s", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.toggleShowDate();
+      return false;
+    });
   }
 
   private toggleToCurrentFileHistory(): void {
@@ -62,6 +74,15 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
   private clearHistory(): void {
     this.close();
     void this.plugin.clearGlobalHistory();
+  }
+
+  private toggleShowDate(): void {
+    this.showDateInModal = !this.showDateInModal;
+    if (this.chooser && typeof this.chooser.updateSuggestions === "function") {
+      this.chooser.updateSuggestions();
+    } else if (this.inputEl) {
+      this.inputEl.dispatchEvent(new Event("input"));
+    }
   }
 
   private getCurrentMode(): "edit" | "preview" {
@@ -97,6 +118,10 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
           evt.preventDefault();
           evt.stopPropagation();
           this.clearHistory();
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "s") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.toggleShowDate();
         }
       },
       true
@@ -144,10 +169,25 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
 
   renderSuggestion(match: FuzzyMatch<HistoryEntry>, el: HTMLElement): void {
     super.renderSuggestion(match, el);
-    if (this.plugin.settings.showDateInModal && match.item.timestamp) {
+    if (this.showDateInModal && match.item.timestamp) {
+      let contentEl = el.querySelector(".cursor-history-modal-content") as HTMLElement | null;
+      if (!contentEl) {
+        contentEl = document.createElement("div");
+        contentEl.className = "cursor-history-modal-content";
+        while (el.firstChild) {
+          contentEl.appendChild(el.firstChild);
+        }
+        el.appendChild(contentEl);
+      }
+      contentEl.style.flex = "1 1 auto";
+      contentEl.style.minWidth = "0";
+
       el.style.display = "flex";
+      el.style.flexWrap = "wrap";
       el.style.justifyContent = "space-between";
       el.style.alignItems = "center";
+      el.style.gap = "2px 8px";
+
       const dateStr = new Date(match.item.timestamp).toLocaleString();
       const dateEl = el.createEl("span", {
         text: dateStr,
@@ -155,8 +195,9 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
       });
       dateEl.style.color = "var(--text-muted, gray)";
       dateEl.style.fontSize = "0.8em";
-      dateEl.style.marginLeft = "10px";
       dateEl.style.whiteSpace = "nowrap";
+      dateEl.style.marginLeft = "auto";
+      dateEl.style.textAlign = "right";
     }
   }
 

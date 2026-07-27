@@ -8,6 +8,7 @@ export interface RecentFileItem {
 
 export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
   private plugin: CursorHistoryPlugin;
+  private showDateInModal = false;
 
   constructor(app: App, plugin: CursorHistoryPlugin) {
     super(app);
@@ -16,12 +17,12 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
 
     this.scope.register(["Meta"], "s", (evt: KeyboardEvent) => {
       evt.preventDefault();
-      void this.toggleShowDate();
+      this.toggleShowDate();
       return false;
     });
     this.scope.register(["Mod"], "s", (evt: KeyboardEvent) => {
       evt.preventDefault();
-      void this.toggleShowDate();
+      this.toggleShowDate();
       return false;
     });
   }
@@ -34,16 +35,15 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
         if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "s") {
           evt.preventDefault();
           evt.stopPropagation();
-          void this.toggleShowDate();
+          this.toggleShowDate();
         }
       },
       true
     );
   }
 
-  private async toggleShowDate(): Promise<void> {
-    this.plugin.settings.showDateInModal = !this.plugin.settings.showDateInModal;
-    await this.plugin.saveSettings();
+  private toggleShowDate(): void {
+    this.showDateInModal = !this.showDateInModal;
     if (typeof (this as any).updateSuggestions === "function") {
       (this as any).updateSuggestions();
     } else if (this.inputEl) {
@@ -62,10 +62,25 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
 
   renderSuggestion(match: FuzzyMatch<RecentFileItem>, el: HTMLElement): void {
     super.renderSuggestion(match, el);
-    if (this.plugin.settings.showDateInModal && match.item.timestamp) {
+    if (this.showDateInModal && match.item.timestamp) {
+      let contentEl = el.querySelector(".cursor-history-modal-content") as HTMLElement | null;
+      if (!contentEl) {
+        contentEl = document.createElement("div");
+        contentEl.className = "cursor-history-modal-content";
+        while (el.firstChild) {
+          contentEl.appendChild(el.firstChild);
+        }
+        el.appendChild(contentEl);
+      }
+      contentEl.style.flex = "1 1 auto";
+      contentEl.style.minWidth = "0";
+
       el.style.display = "flex";
+      el.style.flexWrap = "wrap";
       el.style.justifyContent = "space-between";
       el.style.alignItems = "center";
+      el.style.gap = "2px 8px";
+
       const dateStr = new Date(match.item.timestamp).toLocaleString();
       const dateEl = el.createEl("span", {
         text: dateStr,
@@ -73,8 +88,9 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
       });
       dateEl.style.color = "var(--text-muted, gray)";
       dateEl.style.fontSize = "0.8em";
-      dateEl.style.marginLeft = "10px";
       dateEl.style.whiteSpace = "nowrap";
+      dateEl.style.marginLeft = "auto";
+      dateEl.style.textAlign = "right";
     }
   }
 
