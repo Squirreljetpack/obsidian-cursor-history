@@ -19,11 +19,11 @@ An [Obsidian](https://obsidian.md) plugin that tracks cursor position history ac
 
 1. Install **BRAT** from Community Plugins.
 2. Open BRAT settings -> **Add Beta plugin**.
-3. Enter `Squirreljetpack/obsidian-cursor-history-fork`.
+3. Enter `Squirreljetpack/obsidian-cursor-history`.
 
 ### Manual Installation
 
-1. Download `main.js`, `styles.css`, and `manifest.json` from the [latest release](https://github.com/Squirreljetpack/obsidian-cursor-history-fork/releases/latest).
+1. Download `main.js`, `styles.css`, and `manifest.json` from the [latest release](https://github.com/Squirreljetpack/obsidian-cursor-history/releases/latest).
 2. Create a folder `cursor-history` inside your vault's `.obsidian/plugins/` directory.
 3. Place the downloaded files inside that folder.
 4. Reload Obsidian and enable the plugin in **Settings > Community plugins**.
