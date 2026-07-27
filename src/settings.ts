@@ -12,6 +12,7 @@ export interface CursorHistorySettings {
   maxEntries: number;
   maxLineLength: number;
   editColOffset: number;
+  currentFilePreviewFuzzLines: number;
   openRecordDelayMs: number;
   editJumpThreshold: number;
   previewJumpThreshold: number;
@@ -29,6 +30,7 @@ export const DEFAULT_SETTINGS: CursorHistorySettings = {
   maxEntries: 50,
   maxLineLength: 120,
   editColOffset: 10,
+  currentFilePreviewFuzzLines: 0,
   openRecordDelayMs: 1000,
   editJumpThreshold: 1,
   previewJumpThreshold: 10,
@@ -210,6 +212,24 @@ export class CursorHistorySettingTab extends PluginSettingTab {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 0) {
               this.plugin.settings.editColOffset = num;
+              await this.plugin.saveSettings();
+            }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Current file preview fuzz lines")
+      .setDesc(
+        "Number of lines around the target line to search for a non-empty line to display as preview in current file history modal (0 to disable)",
+      )
+      .addText(text =>
+        text
+          .setPlaceholder("0")
+          .setValue(String(this.plugin.settings.currentFilePreviewFuzzLines ?? 0))
+          .onChange(async value => {
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num >= 0) {
+              this.plugin.settings.currentFilePreviewFuzzLines = num;
               await this.plugin.saveSettings();
             }
           })

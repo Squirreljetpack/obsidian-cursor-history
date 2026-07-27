@@ -134,6 +134,29 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
     return stack.slice().reverse();
   }
 
+  private getPreviewLine(targetLineIndex: number): string {
+    const fuzz = Math.max(0, this.plugin.settings.currentFilePreviewFuzzLines ?? 0);
+    const targetLine = this.lines[targetLineIndex] ?? "";
+    if (targetLine.trim() !== "" || fuzz === 0) {
+      return targetLine;
+    }
+    for (let d = 1; d <= fuzz; d++) {
+      const prevIdx = targetLineIndex - d;
+      if (prevIdx >= 0 && prevIdx < this.lines.length) {
+        if (this.lines[prevIdx].trim() !== "") {
+          return this.lines[prevIdx];
+        }
+      }
+      const nextIdx = targetLineIndex + d;
+      if (nextIdx >= 0 && nextIdx < this.lines.length) {
+        if (this.lines[nextIdx].trim() !== "") {
+          return this.lines[nextIdx];
+        }
+      }
+    }
+    return targetLine;
+  }
+
   getItemText(item: HistoryEntry): string {
     let lineNum = 1;
     if (item.mode === "edit") {
@@ -149,7 +172,7 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
       }
     }
     const lineIndex = lineNum - 1;
-    const rawLine = this.lines[lineIndex] ?? "";
+    const rawLine = this.getPreviewLine(lineIndex);
     let lineContent = "";
 
     if (item.mode === "edit") {
@@ -159,6 +182,9 @@ export class CurrentFileHistoryModal extends FuzzySuggestModal<HistoryEntry> {
       lineContent = rawLine.substring(startIndex);
       if (startIndex > 0) {
         lineContent = "..." + lineContent;
+      }
+      if (!lineContent.trim() && rawLine.trim()) {
+        lineContent = rawLine.trim();
       }
     } else {
       lineContent = rawLine.trim();
