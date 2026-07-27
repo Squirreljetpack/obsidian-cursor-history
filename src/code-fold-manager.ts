@@ -1,5 +1,5 @@
 import { MarkdownPostProcessorContext, MarkdownView, setIcon, TFile } from 'obsidian';
-import type CursorHistoryPlugin from './main';
+import type CursorHistoryPlugin from './main.js';
 
 export interface CodeFoldHistoryData {
 	fold_all: boolean;
