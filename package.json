@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-cursor-history",
-	"version": "1.4.0",
+	"version": "1.5.0",
 	"description": "Navigate back and forward through cursor position history across files",
 	"main": "main.js",
 	"scripts": {

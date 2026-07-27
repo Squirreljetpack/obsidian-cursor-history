@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2026-07-26
+
+### Changed
+
+- **In-Memory Date Toggle in Modals**: Removed `showDateInModal` from global plugin settings and `saveSettings()`. Date visibility is now an in-memory modal property (default off; `Cmd+S` / `Ctrl+S` toggles it per modal session).
+- **Native Hotkey Handling**: Removed `hotkeyDefaultsApplied` setting and direct `hotkeys.json` file manipulation in favor of Obsidian's native `addCommand` default hotkey handling.
+
 ## [1.4.0] - 2026-07-25
 
 ### Added
