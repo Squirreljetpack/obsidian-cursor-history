@@ -30,14 +30,14 @@ An [Obsidian](https://obsidian.md) plugin that tracks cursor position history ac
 
 ## Commands & Configuration
 
-Default keybindings are set up automatically on first install:
-
 | Command | Default Binding |
 |---------|-----------------|
-| Cursor History: Go back | Cmd+[ (`Mod+[`) |
-| Cursor History: Go forward | Cmd+] (`Mod+]`) |
+| Cursor History: Go back | `Cmd+[` |
+| Cursor History: Go forward | `Cmd+]` |
 | Cursor History: Open cursor history | (Unbound) |
 | Cursor History: Open recently opened files | (Unbound) |
+| Cursor History: Truncate cursor history | (Unbound) |
+| Cursor History: Toggle fold all code blocks | (Unbound) |
 
 To change them, open **Settings > Hotkeys** and search for "Cursor History".
 

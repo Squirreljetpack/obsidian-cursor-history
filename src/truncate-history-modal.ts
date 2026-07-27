@@ -1,5 +1,5 @@
 import { App, Modal, Notice, Setting } from "obsidian";
-import type CursorHistoryPlugin from "./main";
+import type CursorHistoryPlugin from "./main.js";
 
 export class TruncateHistoryModal extends Modal {
   private plugin: CursorHistoryPlugin;

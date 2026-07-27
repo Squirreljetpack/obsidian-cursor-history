@@ -1,5 +1,5 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
-import type CursorHistoryPlugin from "./main";
+import type CursorHistoryPlugin from "./main.js";
 
 export interface CursorHistorySettings {
   useFolderLocalHistory: boolean;
@@ -14,6 +14,7 @@ export interface CursorHistorySettings {
   editJumpThreshold: number;
   previewJumpThreshold: number;
   scrollDebounceMs: number;
+  historySaveDelaySec: number;
 }
 
 export const DEFAULT_SETTINGS: CursorHistorySettings = {
@@ -29,6 +30,7 @@ export const DEFAULT_SETTINGS: CursorHistorySettings = {
   editJumpThreshold: 1,
   previewJumpThreshold: 10,
   scrollDebounceMs: 100,
+  historySaveDelaySec: 10,
 };
 
 export class CursorHistorySettingTab extends PluginSettingTab {
@@ -95,13 +97,29 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Use folder local history")
-      .setDesc("Save history stack to .obsidian/cursor-history/cursor.json instead of plugin data.json")
+      .setDesc("Save history to .obsidian/cursor-history/cursor.json instead of plugin data.json")
       .addToggle(toggle =>
         toggle
           .setValue(this.plugin.settings.useFolderLocalHistory)
           .onChange(async value => {
             this.plugin.settings.useFolderLocalHistory = value;
-            await this.plugin.saveSettingsAndHistory();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("History save delay (seconds)")
+      .setDesc("Delay in seconds before auto-saving history changes to disk")
+      .addText(text =>
+        text
+          .setPlaceholder("10")
+          .setValue(String(this.plugin.settings.historySaveDelaySec ?? 10))
+          .onChange(async value => {
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num >= 0) {
+              this.plugin.settings.historySaveDelaySec = num;
+              await this.plugin.saveSettings();
+            }
           })
       );
 

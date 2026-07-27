@@ -1,11 +1,8 @@
-import { Extension } from "@codemirror/state";
-import { EditorView, keymap, ViewUpdate } from "@codemirror/view";
-import { MarkdownView, Notice, normalizePath, PaneType, Plugin, SplitDirection, TFile, WorkspaceLeaf } from "obsidian";
-import { CodeFoldManager } from "./code-fold-manager";
-import { CurrentFileHistoryModal } from "./current-file-history-modal";
-import { HistoryNavigatorModal } from "./history-navigator-modal";
-import { RecentFileItem, RecentFilesModal } from "./recent-files-modal";
-import { TruncateHistoryModal } from "./truncate-history-modal";
+import { EditorView, ViewUpdate } from "@codemirror/view";
+import { MarkdownView, normalizePath, Notice, PaneType, Plugin, SplitDirection, TFile, WorkspaceLeaf } from "obsidian";
+import { CodeFoldManager } from "./code-fold-manager.js";
+import { CurrentFileHistoryModal } from "./current-file-history-modal.js";
+import { HistoryNavigatorModal } from "./history-navigator-modal.js";
 import {
   EditHistoryEntry,
   FileHistoryMap,
@@ -14,32 +11,13 @@ import {
   NavigationStack,
   PreviewHistoryEntry,
   PreviewSelection,
-} from "./navigation-stack";
-import { shouldCreateNewEntry } from "./selection-state";
-import { CursorHistorySettings, CursorHistorySettingTab, DEFAULT_SETTINGS } from "./settings";
+} from "./navigation-stack.js";
+import { RecentFileItem, RecentFilesModal } from "./recent-files-modal.js";
+import { shouldCreateNewEntry } from "./selection-state.js";
+import { CursorHistorySettings, CursorHistorySettingTab, DEFAULT_SETTINGS } from "./settings.js";
+import { TruncateHistoryModal } from "./truncate-history-modal.js";
 
 // --- Obsidian type augmentation for undocumented APIs ---
-
-interface ObsidianHotkey {
-  modifiers: string[];
-  key: string;
-}
-
-declare module "obsidian" {
-  interface App {
-    hotkeyManager: {
-      getHotkeys(id: string): ObsidianHotkey[] | undefined;
-      getDefaultHotkeys(id: string): ObsidianHotkey[];
-      load(): Promise<void>;
-    };
-  }
-  interface MarkdownPreviewView {
-    getScroll(): number;
-    applyScroll(scrollLine: number): void;
-    containerEl: HTMLElement;
-  }
-}
-
 
 export default class CursorHistoryPlugin extends Plugin {
   settings: CursorHistorySettings = DEFAULT_SETTINGS;
@@ -51,7 +29,6 @@ export default class CursorHistoryPlugin extends Plugin {
   private openingFileTimers = new Map<string, number>();
   private openingRestorations = new Map<string, Promise<void>>();
   private leafFileMap = new WeakMap<WorkspaceLeaf, string>();
-  private hotkeyExtension: Extension[] = [];
   private saveTimeoutId: number | null = null;
   private lastActiveLeaf: WorkspaceLeaf | null = null;
   public codeFoldManager = new CodeFoldManager(this);
@@ -129,18 +106,24 @@ export default class CursorHistoryPlugin extends Plugin {
       },
     });
 
-    // Capturing phase DOM click listener for internal links & Reading View clicks
+    // Capturing phase DOM click listener for Reading View clicks (including internal links)
     this.registerDomEvent(
       document,
       "click",
       (evt: MouseEvent) => {
+        if (this.isNavigating) return;
+
         const target = evt.target as HTMLElement | null;
-        const linkEl = target?.closest("a.internal-link");
-        if (linkEl) {
-          this.recordCurrentPosition();
-          return;
-        }
-        this.handleReadingViewClick(evt);
+        if (!target || !target.closest(".markdown-preview-view")) return;
+        if (target.closest("button, input, textarea, select")) return;
+
+        const view = this.getMarkdownViewFromTarget(target);
+        if (!view || view.getMode() !== "preview" || !view.file) return;
+
+        this.ensureLeafLockedIfFileChanged(view.leaf);
+        if (this.openingFiles.has(view.file.path)) return;
+
+        this.handleReadingViewClick(target, view);
       },
       true, // useCapture phase
     );
@@ -210,19 +193,13 @@ export default class CursorHistoryPlugin extends Plugin {
       }),
     );
 
-    // Keymaps for key-repeat support
-    this.registerEditorExtension(this.hotkeyExtension);
     this.app.workspace.onLayoutReady(() => {
-      this.buildKeymap();
       void this.removeNonExistentFileHistories();
     });
-    this.registerEvent(
-      this.app.workspace.on("layout-change", () => this.buildKeymap()),
-    );
   }
 
   async onunload() {
-    await this.saveHistoryStackImmediate();
+    await this.saveHistoryImmediate();
   }
 
   getNavStack(): NavigationStack {
@@ -318,21 +295,13 @@ export default class CursorHistoryPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     const rawData = (await this.loadData()) || {};
-    if (typeof rawData.jumpThreshold === "number") {
-      rawData.previewJumpThreshold = rawData.previewJumpThreshold ?? rawData.jumpThreshold;
-    }
     this.settings = Object.assign({}, DEFAULT_SETTINGS, rawData);
     this.navStack.setMaxSize(this.settings.maxEntries);
-    await this.loadHistoryStack();
+    await this.loadHistory();
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-  }
-
-  async saveSettingsAndHistory(): Promise<void> {
-    await this.saveSettings();
-    await this.saveHistoryStackImmediate();
   }
 
   private getHistoryFilePath(): string {
@@ -385,10 +354,10 @@ export default class CursorHistoryPlugin extends Plugin {
     this.cleanupInvalidDbEntries();
 
     if (
-      this.fileLastPositions.size !== initialPosCount ||
-      this.navStack.getStack().length !== initialStackCount
+      this.fileLastPositions.size !== initialPosCount
+      || this.navStack.getStack().length !== initialStackCount
     ) {
-      await this.saveHistoryStackImmediate();
+      await this.saveHistoryImmediate();
     }
   }
 
@@ -412,7 +381,7 @@ export default class CursorHistoryPlugin extends Plugin {
       if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "edit") {
         this.currentState = null;
       }
-      await this.saveHistoryStackImmediate();
+      await this.saveHistoryImmediate();
       new Notice(`Cleared edit cursor history for ${view.file.basename}`);
     } else {
       await this.codeFoldManager.clearFileFoldHistory(filePath);
@@ -425,7 +394,7 @@ export default class CursorHistoryPlugin extends Plugin {
       if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "preview") {
         this.currentState = null;
       }
-      await this.saveHistoryStackImmediate();
+      await this.saveHistoryImmediate();
       new Notice(`Cleared code fold and preview history for ${view.file.basename}`);
     }
     return true;
@@ -436,7 +405,7 @@ export default class CursorHistoryPlugin extends Plugin {
     this.fileLastPositions.clear();
     this.currentState = null;
     await this.codeFoldManager.clearAllFoldHistory();
-    await this.saveHistoryStackImmediate();
+    await this.saveHistoryImmediate();
     new Notice("Cleared global cursor and code fold history.");
   }
 
@@ -465,7 +434,7 @@ export default class CursorHistoryPlugin extends Plugin {
       }
     }
 
-    await this.saveHistoryStackImmediate();
+    await this.saveHistoryImmediate();
     new Notice(`Truncated cursor history to ${n} entries.`);
   }
 
@@ -538,11 +507,11 @@ export default class CursorHistoryPlugin extends Plugin {
   }
 
   private hasOpenFileTargetLine(view: MarkdownView): boolean {
-    const leaf = view.leaf as any;
+    const leaf = view.leaf;
     if (!leaf) return false;
 
     // 1. Check Ephemeral State (eState)
-    const eState = typeof leaf.getEphemeralState === "function" ? leaf.getEphemeralState() : null;
+    const eState = leaf.getEphemeralState();
     if (eState) {
       if (typeof eState.line === "number" && eState.line > 0) {
         return true;
@@ -562,11 +531,9 @@ export default class CursorHistoryPlugin extends Plugin {
     }
 
     // 2. Check View State (state.subpath)
-    const viewState = typeof leaf.getViewState === "function" ? leaf.getViewState() : null;
-    if (viewState?.state) {
-      if (typeof viewState.state.subpath === "string" && viewState.state.subpath.trim() !== "") {
-        return true;
-      }
+    const viewState = leaf.getViewState();
+    if (typeof viewState?.state?.subpath === "string" && viewState.state.subpath.trim() !== "") {
+      return true;
     }
 
     return false;
@@ -630,9 +597,9 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-  private async loadHistoryStack(): Promise<void> {
-    let rawContent: any = null;
+  private async loadHistory(): Promise<void> {
     this.fileLastPositions.clear();
+    let rawContent: FileHistoryMap | null = null;
 
     if (this.settings.useFolderLocalHistory) {
       const path = this.getHistoryFilePath();
@@ -649,71 +616,10 @@ export default class CursorHistoryPlugin extends Plugin {
       rawContent = rawData.historyStack;
     }
 
-    if (Array.isArray(rawContent)) {
-      for (const entry of rawContent as HistoryEntry[]) {
-        if (entry && entry.filePath && entry.selection) {
-          const filePos = this.fileLastPositions.get(entry.filePath) || {};
-          const ts = entry.timestamp || Date.now();
-          if (entry.mode === "edit") {
-            if (!filePos.edit || ts >= filePos.edit.timestamp) {
-              filePos.edit = { selection: entry.selection, timestamp: ts };
-            }
-          } else if (entry.mode === "preview") {
-            if (!filePos.preview || ts >= filePos.preview.timestamp) {
-              filePos.preview = { selection: entry.selection, timestamp: ts };
-            }
-          }
-          this.fileLastPositions.set(entry.filePath, filePos);
-        }
-      }
-    } else if (rawContent && typeof rawContent === "object") {
-      for (const [filePath, value] of Object.entries(rawContent)) {
-        if (Array.isArray(value)) {
-          const filePos: FileLastPositions = {};
-          for (const item of value) {
-            if (item && item.mode && item.selection) {
-              const ts = item.timestamp || Date.now();
-              if (item.mode === "edit") {
-                if (!filePos.edit || ts >= filePos.edit.timestamp) {
-                  filePos.edit = { selection: item.selection, timestamp: ts };
-                }
-              } else if (item.mode === "preview") {
-                if (!filePos.preview || ts >= filePos.preview.timestamp) {
-                  filePos.preview = { selection: item.selection, timestamp: ts };
-                }
-              }
-            }
-          }
-          if (filePos.edit || filePos.preview) {
-            this.fileLastPositions.set(filePath, filePos);
-          }
-        } else if (value && typeof value === "object") {
-          const val = value as any;
-          if (val.edit || val.preview) {
-            const filePos: FileLastPositions = {};
-            if (val.edit && val.edit.selection) {
-              filePos.edit = {
-                selection: val.edit.selection,
-                timestamp: val.edit.timestamp || Date.now(),
-              };
-            }
-            if (val.preview && val.preview.selection) {
-              filePos.preview = {
-                selection: val.preview.selection,
-                timestamp: val.preview.timestamp || Date.now(),
-              };
-            }
-            this.fileLastPositions.set(filePath, filePos);
-          } else if (val.mode && val.selection) {
-            const filePos: FileLastPositions = {};
-            const ts = val.timestamp || Date.now();
-            if (val.mode === "edit") {
-              filePos.edit = { selection: val.selection, timestamp: ts };
-            } else if (val.mode === "preview") {
-              filePos.preview = { selection: val.selection, timestamp: ts };
-            }
-            this.fileLastPositions.set(filePath, filePos);
-          }
+    if (rawContent && typeof rawContent === "object" && !Array.isArray(rawContent)) {
+      for (const [filePath, pos] of Object.entries(rawContent)) {
+        if (pos && typeof pos === "object") {
+          this.fileLastPositions.set(filePath, pos);
         }
       }
     }
@@ -726,13 +632,14 @@ export default class CursorHistoryPlugin extends Plugin {
     if (this.saveTimeoutId !== null) {
       window.clearTimeout(this.saveTimeoutId);
     }
+    const delayMs = (this.settings.historySaveDelaySec ?? 10) * 1000;
     this.saveTimeoutId = window.setTimeout(() => {
       this.saveTimeoutId = null;
-      void this.saveHistoryStackImmediate();
-    }, 2000);
+      void this.saveHistoryImmediate();
+    }, delayMs);
   }
 
-  private async saveHistoryStackImmediate(): Promise<void> {
+  private async saveHistoryImmediate(): Promise<void> {
     if (this.saveTimeoutId !== null) {
       window.clearTimeout(this.saveTimeoutId);
       this.saveTimeoutId = null;
@@ -760,46 +667,48 @@ export default class CursorHistoryPlugin extends Plugin {
 
   private previewScrollTimeoutId: number | null = null;
 
-  private getClickedLineFromElement(target: HTMLElement | null): number | null {
-    let el: HTMLElement | null = target;
-    while (el && !el.classList.contains("markdown-preview-view")) {
-      const dataLine = el.getAttribute("data-line");
-      if (dataLine !== null && dataLine !== "") {
-        const num = parseInt(dataLine, 10);
-        if (!isNaN(num)) return num;
+  private getMarkdownViewFromTarget(target: HTMLElement): MarkdownView | null {
+    const leaves = this.app.workspace.getLeavesOfType("markdown");
+    for (const leaf of leaves) {
+      if (leaf.view instanceof MarkdownView && leaf.view.containerEl.contains(target)) {
+        return leaf.view;
       }
-
-      if (el.dataset && el.dataset.line) {
-        const num = parseInt(el.dataset.line, 10);
-        if (!isNaN(num)) return num;
-      }
-
-      const sec = (el as any).sectionInfo || (el as any).SectionInfo;
-      if (sec && typeof sec.lineStart === "number") {
-        return sec.lineStart;
-      }
-      if (sec && typeof sec.line === "number") {
-        return sec.line;
-      }
-
-      el = el.parentElement;
     }
     return null;
   }
 
-  private handleReadingViewClick(evt: MouseEvent): void {
-    const target = evt.target as HTMLElement | null;
-    if (!target || !target.closest(".markdown-preview-view")) return;
-    if (target.closest("a.internal-link, button, input, textarea, select")) return;
+  private getClickedLineFromElement(target: HTMLElement | null, view: MarkdownView): number | null {
+    if (!target || !view || !view.previewMode) return null;
 
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view || view.getMode() !== "preview" || !view.file) return;
+    const renderer = (view.previewMode as any).renderer;
+    const sections = renderer?.sections;
+    if (Array.isArray(sections)) {
+      for (const section of sections) {
+        if (section && section.el && section.el.contains(target)) {
+          if (section.start && typeof section.start.line === "number") {
+            return section.start.line;
+          }
+          if (typeof section.lineStart === "number") {
+            return section.lineStart;
+          }
+          if (typeof section.line === "number") {
+            return section.line;
+          }
+        }
+      }
+    }
 
-    this.ensureLeafLockedIfFileChanged(view.leaf);
-    if (this.openingFiles.has(view.file.path)) return;
+    return null;
+  }
 
-    const clickedLine = this.getClickedLineFromElement(target);
-    if (clickedLine === null) return;
+  private handleReadingViewClick(target: HTMLElement, view: MarkdownView): void {
+    if (!view.file) return;
+
+    const clickedLine = this.getClickedLineFromElement(target, view);
+    if (clickedLine === null) {
+      this.recordPositionForView(view);
+      return;
+    }
 
     const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
     const scrollTop = previewEl ? previewEl.scrollTop : 0;
@@ -814,14 +723,13 @@ export default class CursorHistoryPlugin extends Plugin {
       timestamp: Date.now(),
     };
 
-    if (
-      shouldCreateNewEntry(
-        this.currentState,
-        entry,
-        this.settings.editJumpThreshold,
-        this.settings.previewJumpThreshold,
-      )
-    ) {
+    const isDifferentPosition = !this.currentState
+      || this.currentState.filePath !== entry.filePath
+      || this.currentState.mode !== "preview"
+      || (this.currentState.selection as PreviewSelection).scrollLine !== clickedLine
+      || Math.abs((this.currentState.selection as PreviewSelection).scrollTop - scrollTop) > 10;
+
+    if (isDifferentPosition) {
       this.navStack.push(entry);
     } else {
       this.navStack.replaceCurrent(entry);
@@ -920,7 +828,7 @@ export default class CursorHistoryPlugin extends Plugin {
 
     if (mode === "preview") {
       const previewView = view.previewMode;
-      let scrollLine = typeof previewView.getScroll === "function" ? previewView.getScroll() : 0;
+      let scrollLine = previewView.getScroll();
       const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
       const scrollTop = previewEl ? previewEl.scrollTop : 0;
 
@@ -929,7 +837,7 @@ export default class CursorHistoryPlugin extends Plugin {
         for (let i = 0; i < sections.length; i++) {
           const sec = sections[i] as HTMLElement;
           if (sec.offsetTop + sec.offsetHeight > previewEl.scrollTop) {
-            const line = this.getClickedLineFromElement(sec);
+            const line = this.getClickedLineFromElement(sec, view);
             if (line !== null && line >= 0) {
               scrollLine = line;
               break;
@@ -971,49 +879,6 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-
-  private buildKeymap(): void {
-    const backKeys = this.getCommandHotkeys("cursor-history:go-back");
-    const forwardKeys = this.getCommandHotkeys("cursor-history:go-forward");
-
-    const bindings: Array<{ key: string; run: () => boolean }> = [];
-
-    for (const hk of backKeys) {
-      bindings.push({
-        key: [...hk.modifiers, hk.key].join("-"),
-        run: () => {
-          void this.goBack();
-          return true;
-        },
-      });
-    }
-
-    for (const hk of forwardKeys) {
-      bindings.push({
-        key: [...hk.modifiers, hk.key].join("-"),
-        run: () => {
-          void this.goForward();
-          return true;
-        },
-      });
-    }
-
-    this.hotkeyExtension.length = 0;
-    if (bindings.length > 0) {
-      this.hotkeyExtension.push(keymap.of(bindings));
-    }
-    this.app.workspace.updateOptions();
-  }
-
-  private getCommandHotkeys(commandId: string): ObsidianHotkey[] {
-    const hm = this.app.hotkeyManager;
-    if (!hm) return [];
-
-    const custom = hm.getHotkeys(commandId);
-    if (custom !== undefined) return custom;
-    return hm.getDefaultHotkeys(commandId) || [];
-  }
-
   private getCurrentMode(): "edit" | "preview" {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (view) {
@@ -1049,45 +914,12 @@ export default class CursorHistoryPlugin extends Plugin {
       }
     }
 
-    if (view) {
-      const current = this.getEntryForView(view);
-      if (
-        current
-        && shouldCreateNewEntry(
-          this.currentState,
-          current,
-          this.settings.editJumpThreshold,
-          this.settings.previewJumpThreshold,
-        )
-      ) {
-        this.navStack.push(current);
-        this.currentState = current;
-      }
-    }
-
     const entry = this.navStack.goBack(mode);
     if (entry) await this.navigateTo(entry);
   }
 
   private async goForward(): Promise<void> {
     const mode = this.getCurrentMode();
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (view) {
-      const current = this.getEntryForView(view);
-      if (
-        current
-        && shouldCreateNewEntry(
-          this.currentState,
-          current,
-          this.settings.editJumpThreshold,
-          this.settings.previewJumpThreshold,
-        )
-      ) {
-        this.navStack.push(current);
-        this.currentState = current;
-      }
-    }
-
     const entry = this.navStack.goForward(mode);
     if (entry) await this.navigateTo(entry);
   }
@@ -1175,9 +1007,8 @@ export default class CursorHistoryPlugin extends Plugin {
           }
 
           const isTargetReached = selection.scrollTop === 0 || Math.abs(previewEl.scrollTop - selection.scrollTop) <= 2;
-          const isAtBottom =
-            previewEl.scrollTop > 0 &&
-            Math.abs(previewEl.scrollTop - (previewEl.scrollHeight - previewEl.clientHeight)) <= 2;
+          const isAtBottom = previewEl.scrollTop > 0
+            && Math.abs(previewEl.scrollTop - (previewEl.scrollHeight - previewEl.clientHeight)) <= 2;
 
           if ((isTargetReached || isAtBottom) && currAttempt >= 2) {
             resolve();

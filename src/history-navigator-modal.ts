@@ -1,7 +1,7 @@
 import { App, FuzzyMatch, FuzzySuggestModal, MarkdownView, PaneType, SplitDirection } from "obsidian";
-import type CursorHistoryPlugin from "./main";
-import { CurrentFileHistoryModal } from "./current-file-history-modal";
-import { HistoryEntry } from "./navigation-stack";
+import type CursorHistoryPlugin from "./main.js";
+import { CurrentFileHistoryModal } from "./current-file-history-modal.js";
+import { HistoryEntry } from "./navigation-stack.js";
 
 declare module "obsidian" {
   interface SuggestModal<T> {
