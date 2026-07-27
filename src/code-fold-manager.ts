@@ -108,6 +108,12 @@ export class CodeFoldManager {
 		}
 	}
 
+	async clearAllFoldHistory(): Promise<void> {
+		this.data.files = {};
+		await this.saveHistory();
+		this.plugin.app.workspace.trigger('css-change');
+	}
+
 	async toggleFoldAllCurrentFile(): Promise<void> {
 		const view = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
 		if (!view || !view.file) return;

@@ -135,9 +135,15 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       descFragment.createEl("br"),
       "Tab: Switch between Current File History and Global History",
       descFragment.createEl("br"),
-      "Cmd+S (Ctrl+S on Windows/Linux): Toggle date display",
+      "Cmd+Enter (Ctrl+Enter on Windows/Linux): Open in new tab",
       descFragment.createEl("br"),
-      "Cmd+L (Ctrl+L on Windows/Linux): Clear history (active file in Current File mode, or all history in Global mode)",
+      "Cmd+-: Open in horizontal split",
+      descFragment.createEl("br"),
+      "Cmd+I: Open in vertical split",
+      descFragment.createEl("br"),
+      "Cmd+S: Toggle date display",
+      descFragment.createEl("br"),
+      "Cmd+L: Clear history",
     );
 
     // 3. Pass the fragment to setDesc

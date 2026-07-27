@@ -1,4 +1,4 @@
-import { App, FuzzyMatch, FuzzySuggestModal, MarkdownView } from "obsidian";
+import { App, FuzzyMatch, FuzzySuggestModal, MarkdownView, PaneType, SplitDirection } from "obsidian";
 import type CursorHistoryPlugin from "./main";
 import { CurrentFileHistoryModal } from "./current-file-history-modal";
 import { HistoryEntry } from "./navigation-stack";
@@ -38,6 +38,39 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
       });
     }
 
+    this.scope.register(["Mod"], "Enter", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("tab");
+      return false;
+    });
+    this.scope.register(["Meta"], "Enter", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("tab");
+      return false;
+    });
+
+    this.scope.register(["Mod"], "-", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "horizontal");
+      return false;
+    });
+    this.scope.register(["Meta"], "-", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "horizontal");
+      return false;
+    });
+
+    this.scope.register(["Mod"], "i", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "vertical");
+      return false;
+    });
+    this.scope.register(["Meta"], "i", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "vertical");
+      return false;
+    });
+
     this.scope.register(["Mod"], "l", (evt: KeyboardEvent) => {
       evt.preventDefault();
       this.clearHistory();
@@ -59,6 +92,20 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
       this.toggleShowDate();
       return false;
     });
+  }
+
+  private getSelectedItem(): HistoryEntry | null {
+    if (!this.chooser || !this.chooser.values || this.chooser.values.length === 0) return null;
+    const selected = this.chooser.values[this.chooser.selectedItem];
+    if (!selected) return null;
+    return (selected.item ?? selected) as HistoryEntry;
+  }
+
+  private chooseSelectedItem(newLeaf?: PaneType | boolean, direction?: SplitDirection): void {
+    const item = this.getSelectedItem();
+    if (!item) return;
+    this.close();
+    void this.plugin.navigateTo(item, newLeaf, direction);
   }
 
   private toggleToCurrentFileHistory(): void {
@@ -114,6 +161,21 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
             evt.stopPropagation();
             this.toggleToCurrentFileHistory();
           }
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.chooseSelectedItem("tab");
+        } else if (
+          (evt.metaKey || evt.ctrlKey) &&
+          (evt.key === "-" || evt.code === "Minus" || evt.code === "NumpadSubtract")
+        ) {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.chooseSelectedItem("split", "horizontal");
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "i") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.chooseSelectedItem("split", "vertical");
         } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "l") {
           evt.preventDefault();
           evt.stopPropagation();
@@ -202,6 +264,21 @@ export class HistoryNavigatorModal extends FuzzySuggestModal<HistoryEntry> {
   }
 
   onChooseItem(item: HistoryEntry, evt: MouseEvent | KeyboardEvent): void {
-    void this.plugin.navigateTo(item);
+    let newLeaf: PaneType | boolean | undefined;
+    let direction: SplitDirection | undefined;
+
+    if (evt && (evt.metaKey || evt.ctrlKey)) {
+      if (evt instanceof KeyboardEvent && (evt.key === "-" || evt.code === "Minus" || evt.code === "NumpadSubtract")) {
+        newLeaf = "split";
+        direction = "horizontal";
+      } else if (evt instanceof KeyboardEvent && evt.key.toLowerCase() === "i") {
+        newLeaf = "split";
+        direction = "vertical";
+      } else {
+        newLeaf = "tab";
+      }
+    }
+
+    void this.plugin.navigateTo(item, newLeaf, direction);
   }
 }

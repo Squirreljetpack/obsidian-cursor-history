@@ -1,6 +1,6 @@
 import { Extension } from "@codemirror/state";
 import { EditorView, keymap, ViewUpdate } from "@codemirror/view";
-import { MarkdownView, Notice, normalizePath, Plugin, TFile, WorkspaceLeaf } from "obsidian";
+import { MarkdownView, Notice, normalizePath, PaneType, Plugin, SplitDirection, TFile, WorkspaceLeaf } from "obsidian";
 import { CodeFoldManager } from "./code-fold-manager";
 import { CurrentFileHistoryModal } from "./current-file-history-modal";
 import { HistoryNavigatorModal } from "./history-navigator-modal";
@@ -270,10 +270,14 @@ export default class CursorHistoryPlugin extends Plugin {
     return result;
   }
 
-  public async openRecentFile(file: TFile): Promise<void> {
+  public async openRecentFile(
+    file: TFile,
+    newLeaf?: PaneType | boolean,
+    direction?: SplitDirection,
+  ): Promise<void> {
     const navEntry = this.navStack.findLatestForFile(file.path);
     if (navEntry) {
-      await this.navigateTo(navEntry);
+      await this.navigateTo(navEntry, newLeaf, direction);
       return;
     }
 
@@ -290,12 +294,21 @@ export default class CursorHistoryPlugin extends Plugin {
           selection: pos.selection as any,
           timestamp: pos.timestamp,
         };
-        await this.navigateTo(entry);
+        await this.navigateTo(entry, newLeaf, direction);
         return;
       }
     }
 
-    const leaf = this.app.workspace.getLeaf(false);
+    let leaf: WorkspaceLeaf;
+    if (newLeaf) {
+      if (newLeaf === "split" && direction) {
+        leaf = this.app.workspace.getLeaf("split", direction);
+      } else {
+        leaf = this.app.workspace.getLeaf(newLeaf);
+      }
+    } else {
+      leaf = this.app.workspace.getLeaf(false);
+    }
     await leaf.openFile(file);
   }
 
@@ -422,8 +435,9 @@ export default class CursorHistoryPlugin extends Plugin {
     this.navStack.truncate(0);
     this.fileLastPositions.clear();
     this.currentState = null;
+    await this.codeFoldManager.clearAllFoldHistory();
     await this.saveHistoryStackImmediate();
-    new Notice("Cleared global cursor history.");
+    new Notice("Cleared global cursor and code fold history.");
   }
 
   public async truncateHistory(n: number): Promise<void> {
@@ -1078,23 +1092,47 @@ export default class CursorHistoryPlugin extends Plugin {
     if (entry) await this.navigateTo(entry);
   }
 
-  public async navigateTo(entry: HistoryEntry): Promise<void> {
+  public async navigateTo(
+    entry: HistoryEntry,
+    newLeaf?: PaneType | boolean,
+    direction?: SplitDirection,
+  ): Promise<void> {
     this.isNavigating = true;
 
     try {
       const file = this.getFileByPath(entry.filePath);
       if (!file) return;
 
-      let view = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!view || view.file?.path !== entry.filePath) {
-        const leaf = this.app.workspace.getLeaf(false);
+      let view: MarkdownView | null = null;
+
+      if (newLeaf) {
+        let leaf: WorkspaceLeaf;
+        if (newLeaf === "split" && direction) {
+          leaf = this.app.workspace.getLeaf("split", direction);
+        } else {
+          leaf = this.app.workspace.getLeaf(newLeaf);
+        }
         await leaf.openFile(file);
+        if (leaf.view instanceof MarkdownView) {
+          view = leaf.view;
+        } else {
+          view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        }
+      } else {
         view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        if (!view || view.file?.path !== entry.filePath) {
+          const leaf = this.app.workspace.getLeaf(false);
+          await leaf.openFile(file);
+          view = this.app.workspace.getActiveViewOfType(MarkdownView);
+        }
       }
 
       if (!view || view.file?.path !== entry.filePath) return;
 
       if (entry.mode === "edit") {
+        if (view.getMode() !== "source") {
+          await view.setState({ mode: "source" }, { history: false });
+        }
         const editor = view.editor;
         editor.setSelection(
           { line: entry.selection.startLine, ch: entry.selection.startCol },
@@ -1108,6 +1146,9 @@ export default class CursorHistoryPlugin extends Plugin {
           true,
         );
       } else if (entry.mode === "preview") {
+        if (view.getMode() !== "preview") {
+          await view.setState({ mode: "preview" }, { history: false });
+        }
         await this.applyPreviewScrollWithRetry(view, entry.selection);
       }
 

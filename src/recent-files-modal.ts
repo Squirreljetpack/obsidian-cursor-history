@@ -1,4 +1,4 @@
-import { App, FuzzyMatch, FuzzySuggestModal, TFile } from "obsidian";
+import { App, FuzzyMatch, FuzzySuggestModal, PaneType, SplitDirection, TFile } from "obsidian";
 import type CursorHistoryPlugin from "./main";
 
 export interface RecentFileItem {
@@ -15,6 +15,50 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
     this.plugin = plugin;
     this.setPlaceholder("Type to search recently opened files...");
 
+    this.scope.register(["Mod"], "Enter", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("tab");
+      return false;
+    });
+    this.scope.register(["Meta"], "Enter", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("tab");
+      return false;
+    });
+
+    this.scope.register(["Mod"], "-", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "horizontal");
+      return false;
+    });
+    this.scope.register(["Meta"], "-", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "horizontal");
+      return false;
+    });
+
+    this.scope.register(["Mod"], "i", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "vertical");
+      return false;
+    });
+    this.scope.register(["Meta"], "i", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.chooseSelectedItem("split", "vertical");
+      return false;
+    });
+
+    this.scope.register(["Mod"], "l", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.clearHistory();
+      return false;
+    });
+    this.scope.register(["Meta"], "l", (evt: KeyboardEvent) => {
+      evt.preventDefault();
+      this.clearHistory();
+      return false;
+    });
+
     this.scope.register(["Meta"], "s", (evt: KeyboardEvent) => {
       evt.preventDefault();
       this.toggleShowDate();
@@ -27,12 +71,51 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
     });
   }
 
+  private clearHistory(): void {
+    this.close();
+    void this.plugin.clearGlobalHistory();
+  }
+
+  private getSelectedItem(): RecentFileItem | null {
+    const chooser = (this as any).chooser;
+    if (!chooser || !chooser.values || chooser.values.length === 0) return null;
+    const selected = chooser.values[chooser.selectedItem];
+    if (!selected) return null;
+    return (selected.item ?? selected) as RecentFileItem;
+  }
+
+  private chooseSelectedItem(newLeaf?: PaneType | boolean, direction?: SplitDirection): void {
+    const item = this.getSelectedItem();
+    if (!item) return;
+    this.close();
+    void this.plugin.openRecentFile(item.file, newLeaf, direction);
+  }
+
   onOpen(): void {
     super.onOpen();
     this.containerEl.addEventListener(
       "keydown",
       (evt: KeyboardEvent) => {
-        if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "s") {
+        if ((evt.metaKey || evt.ctrlKey) && evt.key === "Enter") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.chooseSelectedItem("tab");
+        } else if (
+          (evt.metaKey || evt.ctrlKey) &&
+          (evt.key === "-" || evt.code === "Minus" || evt.code === "NumpadSubtract")
+        ) {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.chooseSelectedItem("split", "horizontal");
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "i") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.chooseSelectedItem("split", "vertical");
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "l") {
+          evt.preventDefault();
+          evt.stopPropagation();
+          this.clearHistory();
+        } else if ((evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === "s") {
           evt.preventDefault();
           evt.stopPropagation();
           this.toggleShowDate();
@@ -95,6 +178,21 @@ export class RecentFilesModal extends FuzzySuggestModal<RecentFileItem> {
   }
 
   onChooseItem(item: RecentFileItem, evt: MouseEvent | KeyboardEvent): void {
-    void this.plugin.openRecentFile(item.file);
+    let newLeaf: PaneType | boolean | undefined;
+    let direction: SplitDirection | undefined;
+
+    if (evt && (evt.metaKey || evt.ctrlKey)) {
+      if (evt instanceof KeyboardEvent && (evt.key === "-" || evt.code === "Minus" || evt.code === "NumpadSubtract")) {
+        newLeaf = "split";
+        direction = "horizontal";
+      } else if (evt instanceof KeyboardEvent && evt.key.toLowerCase() === "i") {
+        newLeaf = "split";
+        direction = "vertical";
+      } else {
+        newLeaf = "tab";
+      }
+    }
+
+    void this.plugin.openRecentFile(item.file, newLeaf, direction);
   }
 }
