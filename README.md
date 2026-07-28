@@ -5,7 +5,7 @@ An [Obsidian](https://obsidian.md) plugin that tracks cursor position history ac
 ## Features
 
 - **Cursor Navigation**: Navigate back and forward through cursor history across files and notes (Edit & Reading views).
-- **Position Heuristic**: Configurable line threshold (default 10 lines) creates history entries on larger jumps while updating in place for small movements.
+- **Position Heuristic**: Configurable line threshold creates history entries on larger jumps while updating in place for small movements.
 - **Link Jump Tracking**: Intercepts internal link clicks (`[[note]]`) to capture your source position before navigation occurs.
 - **History Modal**: Fuzzy search history modal (`Cursor History: Open cursor history`) to preview and jump to recorded positions. Toggle between Current File History and Global History with `Tab`. Open in new tab with `Cmd+Enter`, horizontal split with `Cmd+-`, or vertical split with `Cmd+I`. Clear history with `Cmd+L` / `Ctrl+L` (`Meta+L`).
 - **Recently Opened Files Modal**: Fuzzy search modal (`Cursor History: Open recently opened files`) to quickly switch to recently opened files with position restoration.

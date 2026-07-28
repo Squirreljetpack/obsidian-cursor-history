@@ -1,20 +1,30 @@
-import { EditorView, ViewUpdate } from "@codemirror/view";
-import { MarkdownView, normalizePath, Notice, PaneType, Plugin, SplitDirection, TFile, WorkspaceLeaf } from "obsidian";
+import { EditorView, type ViewUpdate } from "@codemirror/view";
+import {
+  MarkdownView,
+  normalizePath,
+  Notice,
+  type PaneType,
+  Plugin,
+  type SplitDirection,
+  TFile,
+  type WorkspaceLeaf,
+} from "obsidian";
 import { CodeFoldManager } from "./code-fold-manager.js";
 import { CurrentFileHistoryModal } from "./current-file-history-modal.js";
 import { HistoryNavigatorModal } from "./history-navigator-modal.js";
 import {
-  EditHistoryEntry,
-  FileHistoryMap,
-  FileLastPositions,
-  HistoryEntry,
+  type EditHistoryEntry,
+  type EditSelection,
+  type FileHistoryMap,
+  type FileLastPositions,
+  type HistoryEntry,
   NavigationStack,
-  PreviewHistoryEntry,
-  PreviewSelection,
+  type PreviewHistoryEntry,
+  type PreviewSelection,
 } from "./navigation-stack.js";
-import { RecentFileItem, RecentFilesModal } from "./recent-files-modal.js";
+import { type RecentFileItem, RecentFilesModal } from "./recent-files-modal.js";
 import { shouldCreateNewEntry } from "./selection-state.js";
-import { CursorHistorySettings, CursorHistorySettingTab, DEFAULT_SETTINGS } from "./settings.js";
+import { type CursorHistorySettings, CursorHistorySettingTab, DEFAULT_SETTINGS } from "./settings.js";
 import { TruncateHistoryModal } from "./truncate-history-modal.js";
 
 // --- Obsidian type augmentation for undocumented APIs ---
@@ -33,7 +43,9 @@ export default class CursorHistoryPlugin extends Plugin {
   private lastActiveLeaf: WorkspaceLeaf | null = null;
   public codeFoldManager = new CodeFoldManager(this);
 
-  private ensureLeafLockedIfFileChanged(leaf: WorkspaceLeaf | null | undefined): void {
+  private ensureLeafLockedIfFileChanged(
+    leaf: WorkspaceLeaf | null | undefined,
+  ): void {
     if (!leaf) return;
     const view = leaf.view;
     if (view instanceof MarkdownView && view.file) {
@@ -77,6 +89,7 @@ export default class CursorHistoryPlugin extends Plugin {
       id: "open-cursor-history",
       name: "Open cursor history",
       callback: () => {
+        this.compressHistoryStacksBeforeModal();
         if (this.settings.initialModal === "global") {
           new HistoryNavigatorModal(this.app, this).open();
         } else {
@@ -134,7 +147,11 @@ export default class CursorHistoryPlugin extends Plugin {
       "scroll",
       (evt: Event) => {
         const target = evt.target as HTMLElement | null;
-        if (target && target.classList && target.classList.contains("markdown-preview-view")) {
+        if (
+          target
+          && target.classList
+          && target.classList.contains("markdown-preview-view")
+        ) {
           this.handleReadingViewScroll();
         }
       },
@@ -161,7 +178,11 @@ export default class CursorHistoryPlugin extends Plugin {
         if (!file || this.isNavigating) return;
         this.lockOpeningFile(file.path);
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (activeView && activeView.file?.path === file.path && activeView.leaf) {
+        if (
+          activeView
+          && activeView.file?.path === file.path
+          && activeView.leaf
+        ) {
           this.leafFileMap.set(activeView.leaf, file.path);
         }
         const openPromise = this.handleDocumentOpen(file);
@@ -378,7 +399,11 @@ export default class CursorHistoryPlugin extends Plugin {
         delete pos.edit;
         if (!pos.edit && !pos.preview) this.fileLastPositions.delete(filePath);
       }
-      if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "edit") {
+      if (
+        this.currentState
+        && this.currentState.filePath === filePath
+        && this.currentState.mode === "edit"
+      ) {
         this.currentState = null;
       }
       await this.saveHistoryImmediate();
@@ -391,11 +416,17 @@ export default class CursorHistoryPlugin extends Plugin {
         delete pos.preview;
         if (!pos.edit && !pos.preview) this.fileLastPositions.delete(filePath);
       }
-      if (this.currentState && this.currentState.filePath === filePath && this.currentState.mode === "preview") {
+      if (
+        this.currentState
+        && this.currentState.filePath === filePath
+        && this.currentState.mode === "preview"
+      ) {
         this.currentState = null;
       }
       await this.saveHistoryImmediate();
-      new Notice(`Cleared code fold and preview history for ${view.file.basename}`);
+      new Notice(
+        `Cleared code fold and preview history for ${view.file.basename}`,
+      );
     }
     return true;
   }
@@ -416,11 +447,13 @@ export default class CursorHistoryPlugin extends Plugin {
       this.fileLastPositions.clear();
       this.currentState = null;
     } else {
-      const entries = Array.from(this.fileLastPositions.entries()).map(([path, pos]) => {
-        const editTs = pos.edit?.timestamp ?? 0;
-        const previewTs = pos.preview?.timestamp ?? 0;
-        return { path, maxTs: Math.max(editTs, previewTs) };
-      });
+      const entries = Array.from(this.fileLastPositions.entries()).map(
+        ([path, pos]) => {
+          const editTs = pos.edit?.timestamp ?? 0;
+          const previewTs = pos.preview?.timestamp ?? 0;
+          return { path, maxTs: Math.max(editTs, previewTs) };
+        },
+      );
 
       entries.sort((a, b) => b.maxTs - a.maxTs);
 
@@ -444,7 +477,9 @@ export default class CursorHistoryPlugin extends Plugin {
       return activeView;
     }
     const leaves = this.app.workspace.getLeavesOfType("markdown");
-    const matchingLeaf = leaves.find((l) => (l.view as MarkdownView).file?.path === filePath);
+    const matchingLeaf = leaves.find(
+      (l) => (l.view as MarkdownView).file?.path === filePath,
+    );
     if (matchingLeaf) {
       return matchingLeaf.view as MarkdownView;
     }
@@ -516,7 +551,10 @@ export default class CursorHistoryPlugin extends Plugin {
       if (typeof eState.line === "number" && eState.line > 0) {
         return true;
       }
-      if (eState.cursor && (eState.cursor.line > 0 || eState.cursor.from?.line > 0)) {
+      if (
+        eState.cursor
+        && (eState.cursor.line > 0 || eState.cursor.from?.line > 0)
+      ) {
         return true;
       }
       if (typeof eState.subpath === "string" && eState.subpath.trim() !== "") {
@@ -532,7 +570,10 @@ export default class CursorHistoryPlugin extends Plugin {
 
     // 2. Check View State (state.subpath)
     const viewState = leaf.getViewState();
-    if (typeof viewState?.state?.subpath === "string" && viewState.state.subpath.trim() !== "") {
+    if (
+      typeof viewState?.state?.subpath === "string"
+      && viewState.state.subpath.trim() !== ""
+    ) {
       return true;
     }
 
@@ -543,7 +584,9 @@ export default class CursorHistoryPlugin extends Plugin {
     let view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || view.file?.path !== filePath) {
       const leaves = this.app.workspace.getLeavesOfType("markdown");
-      const matchingLeaf = leaves.find((l) => (l.view as MarkdownView).file?.path === filePath);
+      const matchingLeaf = leaves.find(
+        (l) => (l.view as MarkdownView).file?.path === filePath,
+      );
       if (matchingLeaf) {
         view = matchingLeaf.view as MarkdownView;
       }
@@ -609,14 +652,21 @@ export default class CursorHistoryPlugin extends Plugin {
           rawContent = JSON.parse(content);
         }
       } catch (err) {
-        console.error("Cursor History: Error reading folder local history file:", err);
+        console.error(
+          "Cursor History: Error reading folder local history file:",
+          err,
+        );
       }
     } else {
       const rawData = (await this.loadData()) || {};
       rawContent = rawData.historyStack;
     }
 
-    if (rawContent && typeof rawContent === "object" && !Array.isArray(rawContent)) {
+    if (
+      rawContent
+      && typeof rawContent === "object"
+      && !Array.isArray(rawContent)
+    ) {
       for (const [filePath, pos] of Object.entries(rawContent)) {
         if (pos && typeof pos === "object") {
           this.fileLastPositions.set(filePath, pos);
@@ -654,9 +704,15 @@ export default class CursorHistoryPlugin extends Plugin {
       const path = this.getHistoryFilePath();
       try {
         await this.ensureHistoryDirectoryExists();
-        await this.app.vault.adapter.write(path, JSON.stringify(fileMap, null, 2));
+        await this.app.vault.adapter.write(
+          path,
+          JSON.stringify(fileMap, null, 2),
+        );
       } catch (err) {
-        console.error("Cursor History: Error writing folder local history file:", err);
+        console.error(
+          "Cursor History: Error writing folder local history file:",
+          err,
+        );
       }
     } else {
       const rawData = (await this.loadData()) || {};
@@ -670,14 +726,20 @@ export default class CursorHistoryPlugin extends Plugin {
   private getMarkdownViewFromTarget(target: HTMLElement): MarkdownView | null {
     const leaves = this.app.workspace.getLeavesOfType("markdown");
     for (const leaf of leaves) {
-      if (leaf.view instanceof MarkdownView && leaf.view.containerEl.contains(target)) {
+      if (
+        leaf.view instanceof MarkdownView
+        && leaf.view.containerEl.contains(target)
+      ) {
         return leaf.view;
       }
     }
     return null;
   }
 
-  private getClickedLineFromElement(target: HTMLElement | null, view: MarkdownView): number | null {
+  private getClickedLineFromElement(
+    target: HTMLElement | null,
+    view: MarkdownView,
+  ): number | null {
     if (!target || !view || !view.previewMode) return null;
 
     const renderer = (view.previewMode as any).renderer;
@@ -701,7 +763,10 @@ export default class CursorHistoryPlugin extends Plugin {
     return null;
   }
 
-  private handleReadingViewClick(target: HTMLElement, view: MarkdownView): void {
+  private handleReadingViewClick(
+    target: HTMLElement,
+    view: MarkdownView,
+  ): void {
     if (!view.file) return;
 
     const clickedLine = this.getClickedLineFromElement(target, view);
@@ -710,7 +775,9 @@ export default class CursorHistoryPlugin extends Plugin {
       return;
     }
 
-    const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
+    const previewEl = view.contentEl.querySelector(
+      ".markdown-preview-view",
+    ) as HTMLElement | null;
     const scrollTop = previewEl ? previewEl.scrollTop : 0;
 
     const entry: PreviewHistoryEntry = {
@@ -740,7 +807,10 @@ export default class CursorHistoryPlugin extends Plugin {
       filePos = {};
       this.fileLastPositions.set(entry.filePath, filePos);
     }
-    filePos.preview = { selection: entry.selection, timestamp: entry.timestamp };
+    filePos.preview = {
+      selection: entry.selection,
+      timestamp: entry.timestamp,
+    };
 
     this.currentState = entry;
     this.scheduleHistorySave();
@@ -829,7 +899,9 @@ export default class CursorHistoryPlugin extends Plugin {
     if (mode === "preview") {
       const previewView = view.previewMode;
       let scrollLine = previewView.getScroll();
-      const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
+      const previewEl = view.contentEl.querySelector(
+        ".markdown-preview-view",
+      ) as HTMLElement | null;
       const scrollTop = previewEl ? previewEl.scrollTop : 0;
 
       if (scrollLine === 0 && previewEl && previewEl.scrollTop > 10) {
@@ -900,8 +972,54 @@ export default class CursorHistoryPlugin extends Plugin {
     return true;
   }
 
+  private isSimilarEntry(a: HistoryEntry, b: HistoryEntry): boolean {
+    const { mergeSimilarEntriesOnJump } = this.settings;
+
+    if (mergeSimilarEntriesOnJump === "off") {
+      return false;
+    }
+
+    // "strict": exact match (scrollLine or full selection equality)
+    if (a.mode === "edit" && b.mode === "edit") {
+      const ae = a.selection as EditSelection;
+      const be = b.selection as EditSelection;
+      return (
+        ae.startLine === be.startLine
+        && ae.startCol === be.startCol
+        && ae.endLine === be.endLine
+        && ae.endCol === be.endCol
+      );
+    }
+
+    if (a.mode === "preview" && b.mode === "preview") {
+      const ap = a.selection as PreviewSelection;
+      const bp = b.selection as PreviewSelection;
+      if (ap.scrollLine === bp.scrollLine) return true;
+      // if (Math.abs(ap.scrollTop - bp.scrollTop) < 10) return true;
+      return false;
+    }
+
+    // "half" or "threshold": use shouldCreateNewEntry logic (returns false when entries are similar)
+    if (
+      mergeSimilarEntriesOnJump === "half"
+      || mergeSimilarEntriesOnJump === "threshold"
+    ) {
+      const { editJumpThreshold, previewJumpThreshold } = this.settings;
+      const editTh = mergeSimilarEntriesOnJump === "half"
+        ? Math.floor(editJumpThreshold / 2)
+        : editJumpThreshold;
+      const previewTh = mergeSimilarEntriesOnJump === "half"
+        ? Math.floor(previewJumpThreshold / 2)
+        : previewJumpThreshold;
+      return !shouldCreateNewEntry(a, b, editTh, previewTh);
+    }
+
+    return false;
+  }
+
   private async goBack(): Promise<void> {
     const mode = this.getCurrentMode();
+    this.navStack.compressSimilarBeforeCurrent(mode, (a, b) => this.isSimilarEntry(a, b));
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
 
     if (view && mode === "edit") {
@@ -920,8 +1038,16 @@ export default class CursorHistoryPlugin extends Plugin {
 
   private async goForward(): Promise<void> {
     const mode = this.getCurrentMode();
+    this.navStack.compressSimilarAfterCurrent(mode, (a, b) => this.isSimilarEntry(a, b));
     const entry = this.navStack.goForward(mode);
     if (entry) await this.navigateTo(entry);
+  }
+
+  private compressHistoryStacksBeforeModal(): void {
+    const mode = this.getCurrentMode();
+    const isSimilar = (a: HistoryEntry, b: HistoryEntry) => this.isSimilarEntry(a, b);
+    this.navStack.compressSimilarBeforeCurrent(mode, isSimilar);
+    this.navStack.compressSimilarAfterCurrent(mode, isSimilar);
   }
 
   public async navigateTo(
@@ -972,7 +1098,10 @@ export default class CursorHistoryPlugin extends Plugin {
         );
         editor.scrollIntoView(
           {
-            from: { line: entry.selection.startLine, ch: entry.selection.startCol },
+            from: {
+              line: entry.selection.startLine,
+              ch: entry.selection.startCol,
+            },
             to: { line: entry.selection.endLine, ch: entry.selection.endCol },
           },
           true,
@@ -992,10 +1121,16 @@ export default class CursorHistoryPlugin extends Plugin {
     }
   }
 
-  private applyPreviewScrollWithRetry(view: MarkdownView, selection: PreviewSelection, attempts = 0): Promise<void> {
+  private applyPreviewScrollWithRetry(
+    view: MarkdownView,
+    selection: PreviewSelection,
+    attempts = 0,
+  ): Promise<void> {
     return new Promise((resolve) => {
       const doScroll = (currAttempt: number) => {
-        const previewEl = view.contentEl.querySelector(".markdown-preview-view") as HTMLElement | null;
+        const previewEl = view.contentEl.querySelector(
+          ".markdown-preview-view",
+        ) as HTMLElement | null;
         const previewView = view.previewMode;
 
         if (previewEl) {
@@ -1006,9 +1141,13 @@ export default class CursorHistoryPlugin extends Plugin {
             previewEl.scrollTop = selection.scrollTop;
           }
 
-          const isTargetReached = selection.scrollTop === 0 || Math.abs(previewEl.scrollTop - selection.scrollTop) <= 2;
+          const isTargetReached = selection.scrollTop === 0
+            || Math.abs(previewEl.scrollTop - selection.scrollTop) <= 2;
           const isAtBottom = previewEl.scrollTop > 0
-            && Math.abs(previewEl.scrollTop - (previewEl.scrollHeight - previewEl.clientHeight)) <= 2;
+            && Math.abs(
+                previewEl.scrollTop
+                  - (previewEl.scrollHeight - previewEl.clientHeight),
+              ) <= 2;
 
           if ((isTargetReached || isAtBottom) && currAttempt >= 2) {
             resolve();

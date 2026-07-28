@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { type App, PluginSettingTab, Setting } from "obsidian";
 import type CursorHistoryPlugin from "./main.js";
 
 export interface CursorHistorySettings {
@@ -15,6 +15,7 @@ export interface CursorHistorySettings {
   previewJumpThreshold: number;
   scrollDebounceMs: number;
   historySaveDelaySec: number;
+  mergeSimilarEntriesOnJump: "off" | "strict" | "half" | "threshold";
 }
 
 export const DEFAULT_SETTINGS: CursorHistorySettings = {
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: CursorHistorySettings = {
   previewJumpThreshold: 10,
   scrollDebounceMs: 100,
   historySaveDelaySec: 10,
+  mergeSimilarEntriesOnJump: "strict",
 };
 
 export class CursorHistorySettingTab extends PluginSettingTab {
@@ -52,11 +54,13 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Restore scroll position on file open")
-      .setDesc("Automatically restore the last known cursor or scroll position when opening a file in the normal way")
-      .addToggle(toggle =>
+      .setDesc(
+        "Automatically restore the last known cursor or scroll position when opening a file in the normal way",
+      )
+      .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.restoreScrollPosition)
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.restoreScrollPosition = value;
             await this.plugin.saveSettings();
           })
@@ -64,11 +68,13 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Remember mode on file open")
-      .setDesc("Automatically switch file mode (edit/reading mode) to the most recently used mode when opening a file")
-      .addToggle(toggle =>
+      .setDesc(
+        "Automatically switch file mode (edit/reading mode) to the most recently used mode when opening a file",
+      )
+      .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.rememberModeOnFileOpen)
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.rememberModeOnFileOpen = value;
             await this.plugin.saveSettings();
           })
@@ -79,11 +85,11 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Delay in milliseconds after opening a file before recording the settled position in navigation stack",
       )
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("1000")
           .setValue(String(this.plugin.settings.openRecordDelayMs ?? 1000))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 0) {
               this.plugin.settings.openRecordDelayMs = num;
@@ -97,11 +103,13 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Use folder local history")
-      .setDesc("Save history to .obsidian/cursor-history/cursor.json instead of plugin data.json")
-      .addToggle(toggle =>
+      .setDesc(
+        "Save history to .obsidian/cursor-history/cursor.json instead of plugin data.json",
+      )
+      .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.useFolderLocalHistory)
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.useFolderLocalHistory = value;
             await this.plugin.saveSettings();
           })
@@ -110,11 +118,11 @@ export class CursorHistorySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("History save delay (seconds)")
       .setDesc("Delay in seconds before auto-saving history changes to disk")
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("10")
           .setValue(String(this.plugin.settings.historySaveDelaySec ?? 10))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 0) {
               this.plugin.settings.historySaveDelaySec = num;
@@ -125,12 +133,14 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Max history entries")
-      .setDesc("Maximum number of global history positions to keep in each stack")
-      .addText(text =>
+      .setDesc(
+        "Maximum number of global history positions to keep in each stack",
+      )
+      .addText((text) =>
         text
           .setPlaceholder("50")
           .setValue(String(this.plugin.settings.maxEntries))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num > 0) {
               this.plugin.settings.maxEntries = num;
@@ -168,12 +178,12 @@ export class CursorHistorySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Default history modal")
       .setDesc(descFragment)
-      .addDropdown(dropdown =>
+      .addDropdown((dropdown) =>
         dropdown
           .addOption("current", "Current file history")
           .addOption("global", "Global history")
           .setValue(this.plugin.settings.initialModal ?? "current")
-          .onChange(async value => {
+          .onChange(async (value) => {
             this.plugin.settings.initialModal = value as "current" | "global";
             await this.plugin.saveSettings();
           })
@@ -184,11 +194,11 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Maximum line length (characters) to display in current file cursor history modal before ellipsizing",
       )
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("120")
           .setValue(String(this.plugin.settings.maxLineLength))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num > 0) {
               this.plugin.settings.maxLineLength = num;
@@ -202,11 +212,11 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Number of characters before the cursor column position to start displaying line text in current file cursor history modal",
       )
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("10")
           .setValue(String(this.plugin.settings.editColOffset ?? 10))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 0) {
               this.plugin.settings.editColOffset = num;
@@ -220,11 +230,13 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Number of lines around the target line to search for a non-empty line to display as preview in current file history modal (0 to disable)",
       )
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("0")
-          .setValue(String(this.plugin.settings.currentFilePreviewFuzzLines ?? 0))
-          .onChange(async value => {
+          .setValue(
+            String(this.plugin.settings.currentFilePreviewFuzzLines ?? 0),
+          )
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 0) {
               this.plugin.settings.currentFilePreviewFuzzLines = num;
@@ -238,12 +250,14 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Edit mode jump threshold (lines)")
-      .setDesc("Minimum line difference required to record a new history entry during editing")
-      .addText(text =>
+      .setDesc(
+        "Minimum line difference required to record a new history entry during editing",
+      )
+      .addText((text) =>
         text
           .setPlaceholder("1")
           .setValue(String(this.plugin.settings.editJumpThreshold))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 1) {
               this.plugin.settings.editJumpThreshold = num;
@@ -257,11 +271,11 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Minimum line difference required to record a new history entry during reading mode scrolling",
       )
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("10")
           .setValue(String(this.plugin.settings.previewJumpThreshold))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 1) {
               this.plugin.settings.previewJumpThreshold = num;
@@ -275,16 +289,38 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Delay in milliseconds to debounce scroll events in Reading mode before recording position",
       )
-      .addText(text =>
+      .addText((text) =>
         text
           .setPlaceholder("100")
           .setValue(String(this.plugin.settings.scrollDebounceMs))
-          .onChange(async value => {
+          .onChange(async (value) => {
             const num = parseInt(value, 10);
             if (!isNaN(num) && num >= 0) {
               this.plugin.settings.scrollDebounceMs = num;
               await this.plugin.saveSettings();
             }
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Merge similar entries on jump")
+      .setDesc(
+        "Select how similar entries around the cursor are merged: strict: full equality; threshold: use the same threshold-based logic as entry recording; half: same as before but with halved thresholds; off: disabled",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("off", "Off")
+          .addOption("strict", "Strict")
+          .addOption("half", "Half")
+          .addOption("threshold", "Threshold")
+          .setValue(this.plugin.settings.mergeSimilarEntriesOnJump)
+          .onChange(async (value) => {
+            this.plugin.settings.mergeSimilarEntriesOnJump = value as
+              | "off"
+              | "strict"
+              | "half"
+              | "threshold";
+            await this.plugin.saveSettings();
           })
       );
 
@@ -296,10 +332,10 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Automatically fold all rendered code blocks in Reading mode by default (changing this setting clears all stored code block fold history)",
       )
-      .addToggle(toggle =>
+      .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.codeFoldManager.getFoldAll())
-          .onChange(async value => {
+          .onChange(async (value) => {
             await this.plugin.codeFoldManager.setFoldAll(value);
           })
       );
@@ -309,10 +345,10 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       .setDesc(
         "Store and restore individual code block fold/unfold states across files in .obsidian/cursor-history/code-fold.json",
       )
-      .addToggle(toggle =>
+      .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.codeFoldManager.getRememberFoldState())
-          .onChange(async value => {
+          .onChange(async (value) => {
             await this.plugin.codeFoldManager.setRememberFoldState(value);
           })
       );
