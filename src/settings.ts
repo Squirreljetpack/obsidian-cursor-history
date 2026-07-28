@@ -6,7 +6,6 @@ export interface CursorHistorySettings {
   restoreScrollPosition: boolean;
   rememberModeOnFileOpen: boolean;
   initialModal: "current" | "global";
-  maxEntries: number;
   maxLineLength: number;
   editColOffset: number;
   currentFilePreviewFuzzLines: number;
@@ -23,7 +22,6 @@ export const DEFAULT_SETTINGS: CursorHistorySettings = {
   restoreScrollPosition: true,
   rememberModeOnFileOpen: false,
   initialModal: "current",
-  maxEntries: 50,
   maxLineLength: 120,
   editColOffset: 10,
   currentFilePreviewFuzzLines: 0,
@@ -49,8 +47,7 @@ export class CursorHistorySettingTab extends PluginSettingTab {
 
     containerEl.createEl("h2", { text: "Cursor History Settings" });
 
-    // Section 1: Navigation & File Behavior
-    containerEl.createEl("h3", { text: "Navigation & File Behavior" });
+    containerEl.createEl("h3", { text: "History settings" });
 
     new Setting(containerEl)
       .setName("Restore scroll position on file open")
@@ -98,23 +95,6 @@ export class CursorHistorySettingTab extends PluginSettingTab {
           })
       );
 
-    // Section 2: History Storage & Capacity
-    containerEl.createEl("h3", { text: "History Storage & Capacity" });
-
-    new Setting(containerEl)
-      .setName("Use folder local history")
-      .setDesc(
-        "Save history to .obsidian/cursor-history/cursor.json instead of plugin data.json",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.useFolderLocalHistory)
-          .onChange(async (value) => {
-            this.plugin.settings.useFolderLocalHistory = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
     new Setting(containerEl)
       .setName("History save delay (seconds)")
       .setDesc("Delay in seconds before auto-saving history changes to disk")
@@ -132,25 +112,19 @@ export class CursorHistorySettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Max history entries")
+      .setName("Use folder local history")
       .setDesc(
-        "Maximum number of global history positions to keep in each stack",
+        "Save history to .obsidian/cursor-history/cursor.json instead of plugin data.json",
       )
-      .addText((text) =>
-        text
-          .setPlaceholder("50")
-          .setValue(String(this.plugin.settings.maxEntries))
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.useFolderLocalHistory)
           .onChange(async (value) => {
-            const num = parseInt(value, 10);
-            if (!isNaN(num) && num > 0) {
-              this.plugin.settings.maxEntries = num;
-              this.plugin.updateMaxEntries(num);
-              await this.plugin.saveSettings();
-            }
+            this.plugin.settings.useFolderLocalHistory = value;
+            await this.plugin.saveSettings();
           })
       );
 
-    // Section 3: History Modals
     containerEl.createEl("h3", { text: "History Modals" });
 
     // 1. Create a fragment
@@ -245,7 +219,6 @@ export class CursorHistorySettingTab extends PluginSettingTab {
           })
       );
 
-    // Section 4: Recording Sensitivity & Thresholds
     containerEl.createEl("h3", { text: "Recording Sensitivity & Thresholds" });
 
     new Setting(containerEl)
@@ -305,7 +278,7 @@ export class CursorHistorySettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Merge similar entries on jump")
       .setDesc(
-        "Select how similar entries around the cursor are merged: strict: full equality; threshold: use the same threshold-based logic as entry recording; half: same as before but with halved thresholds; off: disabled",
+        "Select how similar entries around the cursor are merged: strict: full equality; threshold: use the same threshold-based logic as entry recording; half: same but with halved thresholds; off: disabled",
       )
       .addDropdown((dropdown) =>
         dropdown
@@ -324,8 +297,20 @@ export class CursorHistorySettingTab extends PluginSettingTab {
           })
       );
 
-    // Section 5: Code Block Folding
     containerEl.createEl("h3", { text: "Code Block Folding" });
+
+    new Setting(containerEl)
+      .setName("Remember code block fold state")
+      .setDesc(
+        "Store and restore individual code block fold/unfold states across files",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.codeFoldManager.getRememberFoldState())
+          .onChange(async (value) => {
+            await this.plugin.codeFoldManager.setRememberFoldState(value);
+          })
+      );
 
     new Setting(containerEl)
       .setName("Fold all code blocks by default")
@@ -337,19 +322,6 @@ export class CursorHistorySettingTab extends PluginSettingTab {
           .setValue(this.plugin.codeFoldManager.getFoldAll())
           .onChange(async (value) => {
             await this.plugin.codeFoldManager.setFoldAll(value);
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Remember code block fold state")
-      .setDesc(
-        "Store and restore individual code block fold/unfold states across files in .obsidian/cursor-history/code-fold.json",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.codeFoldManager.getRememberFoldState())
-          .onChange(async (value) => {
-            await this.plugin.codeFoldManager.setRememberFoldState(value);
           })
       );
   }

@@ -31,7 +31,7 @@ import { TruncateHistoryModal } from "./truncate-history-modal.js";
 
 export default class CursorHistoryPlugin extends Plugin {
   settings: CursorHistorySettings = DEFAULT_SETTINGS;
-  private navStack = new NavigationStack(50);
+  private navStack = new NavigationStack();
   private fileLastPositions = new Map<string, FileLastPositions>();
   private currentState: HistoryEntry | null = null;
   private isNavigating = false;
@@ -42,6 +42,10 @@ export default class CursorHistoryPlugin extends Plugin {
   private saveTimeoutId: number | null = null;
   private lastActiveLeaf: WorkspaceLeaf | null = null;
   public codeFoldManager = new CodeFoldManager(this);
+
+  // Track intra-document link clicks to force new entries on scroll
+  private lastIntraDocLinkClickTimestamp = 0;
+  private readonly INTRA_LINK_CLICK_WINDOW_MS = 1000; // 1s flag expiry
 
   private ensureLeafLockedIfFileChanged(
     leaf: WorkspaceLeaf | null | undefined,
@@ -129,6 +133,18 @@ export default class CursorHistoryPlugin extends Plugin {
         const target = evt.target as HTMLElement | null;
         if (!target || !target.closest(".markdown-preview-view")) return;
         if (target.closest("button, input, textarea, select")) return;
+
+        // Detect if an intra-document internal link / anchor / footnote was clicked
+        const linkEl = target.closest("a");
+        if (
+          linkEl
+          && (linkEl.classList.contains("internal-link")
+            || linkEl.classList.contains("footnote-link")
+            || linkEl.classList.contains("footnote-backref")
+            || linkEl.getAttribute("href")?.startsWith("#"))
+        ) {
+          this.lastIntraDocLinkClickTimestamp = Date.now();
+        }
 
         const view = this.getMarkdownViewFromTarget(target);
         if (!view || view.getMode() !== "preview" || !view.file) return;
@@ -246,7 +262,7 @@ export default class CursorHistoryPlugin extends Plugin {
     const stack = this.navStack.getStack();
     for (const entry of stack) {
       const currentMax = timestamps.get(entry.filePath) ?? 0;
-      const ts = entry.timestamp ?? 0;
+      const ts = entry.timestamp;
       if (ts > currentMax) {
         timestamps.set(entry.filePath, ts);
       }
@@ -310,14 +326,9 @@ export default class CursorHistoryPlugin extends Plugin {
     await leaf.openFile(file);
   }
 
-  updateMaxEntries(size: number): void {
-    this.navStack.setMaxSize(size);
-  }
-
   async loadSettings(): Promise<void> {
     const rawData = (await this.loadData()) || {};
     this.settings = Object.assign({}, DEFAULT_SETTINGS, rawData);
-    this.navStack.setMaxSize(this.settings.maxEntries);
     await this.loadHistory();
   }
 
@@ -490,7 +501,7 @@ export default class CursorHistoryPlugin extends Plugin {
     if (!filePath) return;
     this.openingFiles.add(filePath);
 
-    const delay = this.settings.openRecordDelayMs ?? 1000;
+    const delay = this.settings.openRecordDelayMs;
 
     const existingTimer = this.openingFileTimers.get(filePath);
     if (existingTimer !== undefined) {
@@ -682,7 +693,7 @@ export default class CursorHistoryPlugin extends Plugin {
     if (this.saveTimeoutId !== null) {
       window.clearTimeout(this.saveTimeoutId);
     }
-    const delayMs = (this.settings.historySaveDelaySec ?? 10) * 1000;
+    const delayMs = this.settings.historySaveDelaySec * 1000;
     this.saveTimeoutId = window.setTimeout(() => {
       this.saveTimeoutId = null;
       void this.saveHistoryImmediate();
@@ -832,24 +843,35 @@ export default class CursorHistoryPlugin extends Plugin {
     this.previewScrollTimeoutId = window.setTimeout(() => {
       this.previewScrollTimeoutId = null;
       if (view.file && !this.openingFiles.has(view.file.path)) {
-        this.recordCurrentPosition();
+        // Check if intra-doc link click flag is active within 1 second expiry
+        const isFromLinkClick = Date.now() - this.lastIntraDocLinkClickTimestamp
+          < this.INTRA_LINK_CLICK_WINDOW_MS;
+
+        this.recordCurrentPosition(true, isFromLinkClick);
       }
-    }, this.settings.scrollDebounceMs ?? 100);
+    }, this.settings.scrollDebounceMs);
   }
 
-  private recordCurrentPosition(saveToDisk = true): void {
+  private recordCurrentPosition(
+    saveToDisk = true,
+    forceNewEntry = false,
+  ): void {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view?.file) return;
-    this.recordPositionForView(view, saveToDisk);
+    this.recordPositionForView(view, saveToDisk, forceNewEntry);
   }
 
   private recordPositionForLeaf(leaf: WorkspaceLeaf, saveToDisk = true): void {
     if (leaf.view instanceof MarkdownView && leaf.view.file) {
-      this.recordPositionForView(leaf.view, saveToDisk);
+      this.recordPositionForView(leaf.view, saveToDisk, false);
     }
   }
 
-  private recordPositionForView(view: MarkdownView, saveToDisk = true): void {
+  private recordPositionForView(
+    view: MarkdownView,
+    saveToDisk = true,
+    forceNewEntry = false,
+  ): void {
     if (!view?.file) return;
 
     this.ensureLeafLockedIfFileChanged(view.leaf);
@@ -861,7 +883,8 @@ export default class CursorHistoryPlugin extends Plugin {
     if (!this.isValidFilePath(entry.filePath)) return;
 
     if (
-      shouldCreateNewEntry(
+      forceNewEntry
+      || shouldCreateNewEntry(
         this.currentState,
         entry,
         this.settings.editJumpThreshold,
@@ -994,8 +1017,12 @@ export default class CursorHistoryPlugin extends Plugin {
     if (a.mode === "preview" && b.mode === "preview") {
       const ap = a.selection as PreviewSelection;
       const bp = b.selection as PreviewSelection;
-      if (ap.scrollLine === bp.scrollLine) return true;
-      // if (Math.abs(ap.scrollTop - bp.scrollTop) < 10) return true;
+      if (
+        ap.scrollLine === bp.scrollLine
+        && Math.abs(ap.scrollTop - bp.scrollTop) < 20
+      ) {
+        return true;
+      }
       return false;
     }
 

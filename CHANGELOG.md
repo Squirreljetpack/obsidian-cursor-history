@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.0] - 2026-07-28
+
+### Added
+
+- **Merge Similar Entries on Jump Setting**: New dropdown setting (`Merge similar entries on jump`) with four options:
+  - **Off**: No merging, preserves all history entries.
+  - **Strict** (default): Merges only entries with identical scroll position or exact cursor selection.
+  - **Threshold**: Uses the same jump thresholds as entry recording (`editJumpThreshold` / `previewJumpThreshold`) to determine similarity.
+  - **Half**: Same logic as Threshold but with halved thresholds.
+- The merge is applied both before (go back) and after (go forward) navigation, and also when opening the history modal.
+
+### Fixed
+
+- **README Installation URLs**: Fixed incorrect fork repository URL in installation instructions.
+
 ## [1.5.0] - 2026-07-26
 
 ### Changed
